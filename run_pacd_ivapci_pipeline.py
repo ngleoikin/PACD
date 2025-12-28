@@ -752,9 +752,9 @@ class IVAPCIEffectEstimator:
         corr, p_corr = spearmanr(residuals, Z_env)
         robustness["exclusion_corr"] = float(corr)
         robustness["exclusion_p"] = float(p_corr)
-            robustness["exclusion_leak_flag"] = (
-                abs(corr) > 0.1 and p_corr < self.config.p_threshold
-            )
+        robustness["exclusion_leak_flag"] = (
+            abs(corr) > 0.1 and p_corr < self.config.p_threshold
+        )
 
         if "COND" in data.columns and self.intervention_map:
             envs = data["COND"].unique().tolist()
