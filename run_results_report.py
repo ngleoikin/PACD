@@ -43,6 +43,8 @@ def _format_cell(value: Any) -> str:
         return "N/A"
     if pd.isna(value):
         return "N/A"
+    if isinstance(value, float):
+        return f"{value:.4f}"
     return str(value)
 
 
