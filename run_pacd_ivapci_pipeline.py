@@ -62,6 +62,7 @@ class PipelineConfig:
     # Step 2: 干预定向
     intervention_alpha: float = 0.05
     min_intervention_effect: float = 0.1
+    baseline_conditions: Tuple[str, str] = ("CD3CD28", "CD3CD28+ICAM2")
 
     # Step 3: 效应估计
     estimator: str = "ivapci"
@@ -70,7 +71,8 @@ class PipelineConfig:
     n_bootstrap: int = 50
 
     # Step 4: 回灌剪枝
-    effect_threshold: float = 5.0
+    effect_threshold: Optional[float] = None
+    effect_threshold_quantile: float = 0.6
     indirect_ratio: float = 0.3
     p_threshold: float = 0.05
 
@@ -314,7 +316,7 @@ class InterventionDirector:
     def __init__(self, config: PipelineConfig, intervention_map: Dict):
         self.config = config
         self.intervention_map = intervention_map
-        self.baseline_conditions = ["CD3CD28", "CD3CD28+ICAM2"]
+        self.baseline_conditions = list(config.baseline_conditions)
         self.direction_evidence_: Dict[str, Dict] = {}
 
     def _candidate_envs(self, source: str, target: str) -> List[str]:
@@ -551,7 +553,7 @@ class IVAPCIEffectEstimator:
         candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """估计直接效应（控制中介变量后）"""
-        baseline_conditions = ["CD3CD28", "CD3CD28+ICAM2"]
+        baseline_conditions = list(self.config.baseline_conditions)
         if candidate_envs_override is not None:
             candidate_envs = candidate_envs_override
         else:
@@ -642,7 +644,7 @@ class IVAPCIEffectEstimator:
             except Exception:
                 pass
 
-        fallback = self._simple_dr_estimate(data_sub, source, target, w_vars)
+        fallback = self.ipw_estimate(data_sub, source, target, w_vars)
         fallback["robustness"] = robustness
         return fallback
 
@@ -666,10 +668,10 @@ class IVAPCIEffectEstimator:
             candidate_envs_override=candidate_envs_override,
         )
 
-    def _simple_dr_estimate(
+    def ipw_estimate(
         self, data: pd.DataFrame, source: str, target: str, covariates: List[str]
     ) -> Dict:
-        """简化DR估计"""
+        """IPW 估计"""
         n = len(data)
         A = (data[source].values > np.median(data[source].values)).astype(int)
         Y = data[target].values
@@ -711,7 +713,7 @@ class IVAPCIEffectEstimator:
             "se": float(se),
             "ci": [float(ci[0]), float(ci[1])],
             "p_value": float(p_value),
-            "method": "simple_dr",
+            "method": "ipw",
         }
 
     def _estimate_robustness(
@@ -754,7 +756,7 @@ class IVAPCIEffectEstimator:
                 subset = data[data["COND"] != env]
                 if len(subset) < 20:
                     continue
-                tau = self._simple_dr_estimate(
+                tau = self.ipw_estimate(
                     subset, source, target, covariates
                 )["tau"]
                 taus.append(tau)
@@ -832,6 +834,16 @@ class GraphPruner:
         """剪枝"""
         kept = []
         pruned = []
+        tau_values = [
+            abs(edge.get("tau_direct", edge.get("tau_total", 0)))
+            for edge in edges
+        ]
+        if self.config.effect_threshold is None and tau_values:
+            dynamic_threshold = float(
+                np.quantile(tau_values, self.config.effect_threshold_quantile)
+            )
+        else:
+            dynamic_threshold = self.config.effect_threshold or 0.0
 
         for edge in edges:
             source = edge["source"]
@@ -849,9 +861,9 @@ class GraphPruner:
 
             prune_reason = None
 
-            if abs(tau) < self.config.effect_threshold:
+            if abs(tau) < dynamic_threshold:
                 prune_reason = (
-                    f"weak_effect (|τ|={abs(tau):.2f} < {self.config.effect_threshold})"
+                    f"weak_effect (|τ|={abs(tau):.2f} < {dynamic_threshold:.2f})"
                 )
             elif p_value > self.config.p_threshold:
                 prune_reason = (
@@ -1072,9 +1084,9 @@ class PACDIVAPCIPipeline:
                 elif self.config.estimator == "ivapci":
                     method_hint = "(IVAPCI)"
                 else:
-                    method_hint = "(DR)"
+                    method_hint = "(IPW)"
             else:
-                method_hint = "(DR)"
+                method_hint = "(IPW)"
 
             print(f"  [{idx + 1}/{len(sorted_edges)}] {source} → {target} {method_hint}")
 
@@ -1306,8 +1318,25 @@ def main() -> None:
     parser.add_argument("--device", default="cpu", help="计算设备")
     parser.add_argument("--top-k", type=int, default=30, help="深度学习估计的边数")
 
-    parser.add_argument("--effect-threshold", type=float, default=5.0, help="效应阈值")
+    parser.add_argument(
+        "--effect-threshold",
+        type=float,
+        default=None,
+        help="效应阈值 (默认使用分位数阈值)",
+    )
+    parser.add_argument(
+        "--effect-quantile",
+        type=float,
+        default=0.6,
+        help="效应阈值分位数 (effect_threshold 为空时生效)",
+    )
     parser.add_argument("--p-threshold", type=float, default=0.05, help="显著性阈值")
+    parser.add_argument(
+        "--baseline-conds",
+        type=str,
+        default="CD3CD28,CD3CD28+ICAM2",
+        help="baseline 条件列表 (逗号分隔)",
+    )
 
     args = parser.parse_args()
 
@@ -1325,6 +1354,9 @@ def main() -> None:
             intervention_map = json.load(handle)
         print(f"加载干预映射: {len(intervention_map)} 个条件")
 
+    baseline_conditions = tuple(
+        [c.strip() for c in args.baseline_conds.split(",") if c.strip()]
+    )
     config = PipelineConfig(
         alpha_ci=args.alpha,
         max_k=args.max_k,
@@ -1333,7 +1365,9 @@ def main() -> None:
         ivapci_device=args.device,
         top_k_ivapci=args.top_k,
         effect_threshold=args.effect_threshold,
+        effect_threshold_quantile=args.effect_quantile,
         p_threshold=args.p_threshold,
+        baseline_conditions=baseline_conditions,
     )
 
     pipeline = PACDIVAPCIPipeline(config)
