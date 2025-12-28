@@ -26,7 +26,10 @@ def _load_json(path: Path) -> Optional[Dict[str, Any]]:
 def _load_csv(path: Path) -> Optional[pd.DataFrame]:
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def _format_edge_table(df: pd.DataFrame, cols: List[str], limit: int = 20) -> str:
