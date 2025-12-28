@@ -60,43 +60,75 @@ def _score_skeleton(true_edges: List[Tuple[str, str]], pred_edges: List[Tuple[st
     }
 
 
-def _scenario_linear(n: int, rng: np.random.Generator):
+def _scenario_linear(n: int, rng: np.random.Generator, n_vars: int):
     x1 = rng.normal(size=n)
     x2 = 0.8 * x1 + rng.normal(scale=0.5, size=n)
     x3 = 0.6 * x2 + rng.normal(scale=0.5, size=n)
     x4 = 0.4 * x1 + 0.5 * x3 + rng.normal(scale=0.5, size=n)
-    data = np.column_stack([x1, x2, x3, x4])
+    base = [x1, x2, x3, x4]
+    extra = []
+    for k in range(4, n_vars):
+        parent = base[k % len(base)]
+        extra.append(0.6 * parent + rng.normal(scale=0.6, size=n))
+    data = np.column_stack(base + extra)
     edges = [("X1", "X2"), ("X2", "X3"), ("X1", "X4"), ("X3", "X4")]
+    for idx in range(5, n_vars + 1):
+        parent_idx = (idx - 1) % 4 + 1
+        edges.append((f"X{parent_idx}", f"X{idx}"))
     return data, edges
 
 
-def _scenario_nonlinear(n: int, rng: np.random.Generator):
+def _scenario_nonlinear(n: int, rng: np.random.Generator, n_vars: int):
     x1 = rng.normal(size=n)
     x2 = np.tanh(x1) + rng.normal(scale=0.3, size=n)
     x3 = np.sin(x2) + rng.normal(scale=0.3, size=n)
     x4 = x1 * x3 + rng.normal(scale=0.5, size=n)
-    data = np.column_stack([x1, x2, x3, x4])
+    base = [x1, x2, x3, x4]
+    extra = []
+    for k in range(4, n_vars):
+        parent = base[k % len(base)]
+        extra.append(np.tanh(parent) + rng.normal(scale=0.5, size=n))
+    data = np.column_stack(base + extra)
     edges = [("X1", "X2"), ("X2", "X3"), ("X1", "X4"), ("X3", "X4")]
+    for idx in range(5, n_vars + 1):
+        parent_idx = (idx - 1) % 4 + 1
+        edges.append((f"X{parent_idx}", f"X{idx}"))
     return data, edges
 
 
-def _scenario_heteroscedastic(n: int, rng: np.random.Generator):
+def _scenario_heteroscedastic(n: int, rng: np.random.Generator, n_vars: int):
     x1 = rng.normal(size=n)
     noise = rng.normal(scale=0.2 + 0.3 * np.abs(x1), size=n)
     x2 = 0.7 * x1 + noise
     x3 = 0.6 * x2 + rng.normal(scale=0.4, size=n)
-    data = np.column_stack([x1, x2, x3])
+    base = [x1, x2, x3]
+    extra = []
+    for k in range(3, n_vars):
+        parent = base[k % len(base)]
+        extra.append(0.5 * parent + rng.normal(scale=0.5, size=n))
+    data = np.column_stack(base + extra)
     edges = [("X1", "X2"), ("X2", "X3")]
+    for idx in range(4, n_vars + 1):
+        parent_idx = (idx - 1) % 3 + 1
+        edges.append((f"X{parent_idx}", f"X{idx}"))
     return data, edges
 
 
-def _scenario_measurement_error(n: int, rng: np.random.Generator):
+def _scenario_measurement_error(n: int, rng: np.random.Generator, n_vars: int):
     x1_true = rng.normal(size=n)
     x1 = x1_true + rng.normal(scale=0.2, size=n)
     x2 = 0.9 * x1_true + rng.normal(scale=0.5, size=n)
     x3 = 0.6 * x2 + rng.normal(scale=0.5, size=n)
-    data = np.column_stack([x1, x2, x3])
+    base = [x1, x2, x3]
+    extra = []
+    for k in range(3, n_vars):
+        parent = base[k % len(base)]
+        extra.append(0.7 * parent + rng.normal(scale=0.6, size=n))
+    data = np.column_stack(base + extra)
     edges = [("X1", "X2"), ("X2", "X3")]
+    for idx in range(4, n_vars + 1):
+        parent_idx = (idx - 1) % 3 + 1
+        edges.append((f"X{parent_idx}", f"X{idx}"))
     return data, edges
 
 
@@ -112,6 +144,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic benchmark for PACD vs PC")
     parser.add_argument("--output", "-o", default="./results/synthetic", help="Output directory")
     parser.add_argument("--n", type=int, default=1000, help="Sample size per scenario")
+    parser.add_argument("--n-vars", type=int, default=12, help="Number of variables")
     parser.add_argument("--alpha", type=float, default=0.001, help="CI significance level")
     parser.add_argument("--max-k", type=int, default=3, help="Maximum conditioning set size")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -123,7 +156,7 @@ def main() -> None:
 
     results = []
     for name, generator in SCENARIOS.items():
-        data, true_edges = generator(args.n, rng)
+        data, true_edges = generator(args.n, rng, args.n_vars)
         var_names = [f"X{i+1}" for i in range(data.shape[1])]
 
         pacd_config = PACDStructureConfig(
