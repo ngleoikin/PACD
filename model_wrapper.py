@@ -186,6 +186,11 @@ class TheoremDiagnosticsConfig: pass
         _ivapci_config = mod.IVAPCIV33TheoryConfig
         return _ivapci_estimator, _ivapci_config, None
 
+    except SyntaxError as exc:
+        location = f"{exc.filename}:{exc.lineno}"
+        line = (exc.text or "").rstrip()
+        _ivapci_error = f"加载IVAPCI失败: {exc.msg} ({location}) -> {line}"
+        return None, None, _ivapci_error
     except Exception as exc:
         _ivapci_error = f"加载IVAPCI失败: {exc}"
         return None, None, _ivapci_error
