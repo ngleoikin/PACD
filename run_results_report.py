@@ -97,6 +97,12 @@ def build_report(
         lines.append("## PACD Graph Summary\n")
         lines.append(f"- Nodes: {len(pacd_graph.get('nodes', []))}\n")
         lines.append(f"- Edges: {len(pacd_graph.get('edges', []))}\n")
+    elif pacd_edges is not None:
+        lines.append("## PACD Graph Summary\n")
+        lines.append(
+            f"- Nodes: {0 if pacd_edges.empty else len(set(pacd_edges['source']) | set(pacd_edges['target']))}\n"
+        )
+        lines.append(f"- Edges: {0 if pacd_edges.empty else len(pacd_edges)}\n")
 
     pc_skeleton = _load_csv(pc_dir / "skeleton.csv")
     pc_cpdag = _load_csv(pc_dir / "cpdag.csv")
