@@ -221,7 +221,7 @@ class PACDSkeletonLearner:
                     (edge["source"], edge["target"])
                     for edge in result["directed_edges"]
                 ],
-                "skeleton_indices": result["skeleton"]["skeleton_indices"],
+                "skeleton_indices": result.get("skeleton_indices", []),
                 "sepsets": result["sepsets"],
                 "edge_strengths": {},
                 "n_edges": result["n_edges"],

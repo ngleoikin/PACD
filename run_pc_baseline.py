@@ -65,8 +65,14 @@ def main() -> None:
         raise SystemExit(f"Missing input file: {data_path}")
 
     df = pd.read_csv(data_path)
-    var_names = list(df.columns)
-    X = df.values.astype(float)
+    numeric_df = df.select_dtypes(include=[np.number])
+    if numeric_df.empty:
+        raise SystemExit("No numeric columns found for PC baseline.")
+    dropped = [col for col in df.columns if col not in numeric_df.columns]
+    if dropped:
+        print(f"Skipping non-numeric columns: {', '.join(dropped)}")
+    var_names = list(numeric_df.columns)
+    X = numeric_df.values.astype(float)
 
     result = _run_pc(X, alpha=args.alpha, max_k=args.max_k)
     skeleton, cpdag = _graph_edges(result.G, var_names)
