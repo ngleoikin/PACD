@@ -172,10 +172,14 @@ class TheoremComplianceDiagnostics:
     def get_summary(self): return {}
 class TheoremDiagnosticsConfig: pass
 """
-            modified = modified.replace(
-                "from .ivapci_theory_diagnostics import",
-                mock_code + "\n# from .ivapci_theory_diagnostics import",
-            )
+            import re
+            pattern = r"from\\s+\\.\\s*ivapci_theory_diagnostics\\s+import\\s*\\([\\s\\S]*?\\)\\s*"
+            modified, count = re.subn(pattern, mock_code + "\n", modified, count=1)
+            if count == 0:
+                modified = modified.replace(
+                    "from .ivapci_theory_diagnostics import",
+                    mock_code + "\n# from .ivapci_theory_diagnostics import",
+                )
 
         mod = types.ModuleType("ivapci_loaded")
         mod.__file__ = str(filepath)
