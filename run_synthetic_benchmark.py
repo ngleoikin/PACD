@@ -140,11 +140,24 @@ SCENARIOS = {
 }
 
 
+SCENARIO_SETS = {
+    "core": ["linear", "nonlinear", "hetero", "measurement"],
+    "stress": ["nonlinear", "hetero", "measurement"],
+    "all": ["linear", "nonlinear", "hetero", "measurement"],
+}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic benchmark for PACD vs PC")
     parser.add_argument("--output", "-o", default="./results/synthetic", help="Output directory")
     parser.add_argument("--n", type=int, default=1000, help="Sample size per scenario")
     parser.add_argument("--n-vars", type=int, default=12, help="Number of variables")
+    parser.add_argument(
+        "--scenario-set",
+        choices=sorted(SCENARIO_SETS.keys()),
+        default="core",
+        help="Scenario set to run",
+    )
     parser.add_argument("--alpha", type=float, default=0.001, help="CI significance level")
     parser.add_argument("--max-k", type=int, default=3, help="Maximum conditioning set size")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -155,7 +168,9 @@ def main() -> None:
     rng = np.random.default_rng(args.seed)
 
     results = []
-    for name, generator in SCENARIOS.items():
+    scenario_names = SCENARIO_SETS[args.scenario_set]
+    for name in scenario_names:
+        generator = SCENARIOS[name]
         data, true_edges = generator(args.n, rng, args.n_vars)
         var_names = [f"X{i+1}" for i in range(data.shape[1])]
 
@@ -180,6 +195,7 @@ def main() -> None:
             {
                 "scenario": name,
                 "n": args.n,
+                "n_vars": args.n_vars,
                 "pacd": pacd_score,
                 "pc": pc_score,
                 "pc_available": pc_available,
