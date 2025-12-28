@@ -48,3 +48,12 @@ Outputs:
 - per-scenario CSV data
 - ground-truth edges (`*_truth.json`)
 - summary metrics (`summary.json`)
+
+### Results report
+
+Generate a Markdown report that summarizes PACD outputs, PC baseline outputs,
+and the synthetic benchmark summary:
+
+```bash
+python run_results_report.py --pacd results/pacd --pc results/pc --synthetic results/synthetic --output results/report.md
+```
