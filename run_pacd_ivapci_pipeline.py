@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.stats import mannwhitneyu, norm, pearsonr, spearmanr
+from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression, Ridge
 
 warnings.filterwarnings("ignore")
@@ -316,131 +317,198 @@ class InterventionDirector:
         self.baseline_conditions = ["CD3CD28", "CD3CD28+ICAM2"]
         self.direction_evidence_: Dict[str, Dict] = {}
 
-    def get_intervention_effect(
-        self, data: pd.DataFrame, source: str, target: str
-    ) -> Dict:
-        """
-        计算干预source对target的效应
-        """
-        int_envs = [
+    def _candidate_envs(self, source: str, target: str) -> List[str]:
+        return [
             condition
             for condition, info in self.intervention_map.items()
-            if source in info.get("targets", [])
+            if source in info.get("targets", []) and target not in info.get("targets", [])
         ]
 
-        if not int_envs:
-            return {
-                "effect": 0,
-                "p_value": 1.0,
-                "n_environments": 0,
-                "evidence": "none",
-            }
-
+    def _filter_valid_envs(
+        self, data: pd.DataFrame, source: str, candidate_envs: List[str]
+    ) -> List[Dict]:
         baseline = data[data["COND"].isin(self.baseline_conditions)]
         if len(baseline) < 20:
-            return {
-                "effect": 0,
-                "p_value": 1.0,
-                "n_environments": 0,
-                "evidence": "insufficient",
-            }
+            return []
 
-        effects = []
-        p_values = []
-
-        for env in int_envs:
+        valid_envs = []
+        for env in candidate_envs:
             int_data = data[data["COND"] == env]
             if len(int_data) < 20:
                 continue
-
             try:
-                _, p = mannwhitneyu(
-                    baseline[target], int_data[target], alternative="two-sided"
+                _, p_x = mannwhitneyu(
+                    baseline[source], int_data[source], alternative="two-sided"
                 )
-                effect = np.mean(int_data[target]) - np.mean(baseline[target])
-                effects.append(effect)
-                p_values.append(p)
+                delta_x = np.mean(int_data[source]) - np.mean(baseline[source])
             except Exception:
                 continue
 
+            if (
+                p_x < self.config.intervention_alpha
+                and abs(delta_x) > self.config.min_intervention_effect
+            ):
+                valid_envs.append(
+                    {
+                        "env": env,
+                        "delta_x": float(delta_x),
+                        "p_x": float(p_x),
+                        "n": len(int_data),
+                    }
+                )
+        return valid_envs
+
+    def _combined_stouffer(self, effects: List[Tuple[float, float, int]]) -> Dict:
         if not effects:
             return {
                 "effect": 0,
                 "p_value": 1.0,
                 "n_environments": 0,
                 "evidence": "none",
+                "z": 0.0,
             }
-
-        avg_effect = np.mean(effects)
-        combined_p = 1 - stats.chi2.cdf(
-            -2 * np.sum(np.log(np.array(p_values) + 1e-10)),
-            2 * len(p_values),
-        )
-
+        z_scores = []
+        weights = []
+        for delta, p, n in effects:
+            z = norm.isf(max(min(p, 1 - 1e-8), 1e-8) / 2.0)
+            sign = 1.0 if delta >= 0 else -1.0
+            z_scores.append(sign * z)
+            weights.append(np.sqrt(max(n, 1)))
+        z_scores = np.array(z_scores)
+        weights = np.array(weights)
+        z_combined = np.sum(weights * z_scores) / (np.sqrt(np.sum(weights**2)) + 1e-8)
+        p_value = 2 * (1 - norm.cdf(abs(z_combined)))
+        avg_effect = float(np.mean([delta for delta, _, _ in effects]))
         evidence = (
             "strong"
-            if combined_p < 0.01
-            else ("moderate" if combined_p < 0.05 else "weak")
+            if p_value < 0.01
+            else ("moderate" if p_value < 0.05 else "weak")
         )
-
         return {
-            "effect": float(avg_effect),
-            "p_value": float(combined_p),
+            "effect": avg_effect,
+            "p_value": float(p_value),
             "n_environments": len(effects),
             "evidence": evidence,
+            "z": float(z_combined),
+        }
+
+    def get_direction_evidence(
+        self, data: pd.DataFrame, source: str, target: str, sepset: List[str]
+    ) -> Dict:
+        candidate_envs = self._candidate_envs(source, target)
+        if not candidate_envs:
+            return {
+                "x_shift": self._combined_stouffer([]),
+                "y_shift": self._combined_stouffer([]),
+                "residual_shift": self._combined_stouffer([]),
+                "valid_envs": [],
+            }
+
+        baseline = data[data["COND"].isin(self.baseline_conditions)]
+        valid_envs = self._filter_valid_envs(data, source, candidate_envs)
+
+        y_effects = []
+        residual_effects = []
+        x_effects = []
+        if valid_envs:
+            if sepset:
+                model = Ridge(alpha=0.1)
+                model.fit(baseline[sepset].values, baseline[target].values)
+                base_residual = baseline[target].values - model.predict(
+                    baseline[sepset].values
+                )
+            else:
+                base_residual = baseline[target].values - np.mean(baseline[target].values)
+
+            for env in valid_envs:
+                int_data = data[data["COND"] == env["env"]]
+                _, p_y = mannwhitneyu(
+                    baseline[target], int_data[target], alternative="two-sided"
+                )
+                delta_y = np.mean(int_data[target]) - np.mean(baseline[target])
+                y_effects.append((delta_y, p_y, env["n"]))
+                x_effects.append((env["delta_x"], env["p_x"], env["n"]))
+
+                if sepset:
+                    int_residual = int_data[target].values - model.predict(
+                        int_data[sepset].values
+                    )
+                else:
+                    int_residual = int_data[target].values - np.mean(
+                        baseline[target].values
+                    )
+                _, p_res = mannwhitneyu(
+                    base_residual, int_residual, alternative="two-sided"
+                )
+                delta_res = np.mean(int_residual) - np.mean(base_residual)
+                residual_effects.append((delta_res, p_res, env["n"]))
+
+        return {
+            "x_shift": self._combined_stouffer(x_effects),
+            "y_shift": self._combined_stouffer(y_effects),
+            "residual_shift": self._combined_stouffer(residual_effects),
+            "valid_envs": valid_envs,
         }
 
     def orient_edges(
-        self, data: pd.DataFrame, skeleton: List[Tuple[str, str]]
+        self,
+        data: pd.DataFrame,
+        skeleton: List[Tuple[str, str]],
+        sepsets: Dict[str, List[str]],
     ) -> List[Dict]:
         """对骨架中的边进行定向"""
         directed_edges = []
 
         for (v1, v2) in skeleton:
-            effect_1to2 = self.get_intervention_effect(data, v1, v2)
-            effect_2to1 = self.get_intervention_effect(data, v2, v1)
+            sepset_12 = sepsets.get(f"{v1}|{v2}", sepsets.get(f"{v2}|{v1}", []))
+            evidence_1to2 = self.get_direction_evidence(data, v1, v2, sepset_12)
+            evidence_2to1 = self.get_direction_evidence(data, v2, v1, sepset_12)
 
-            if effect_1to2["evidence"] != "none" and effect_2to1["evidence"] == "none":
-                source, target = v1, v2
+            score_1to2 = (
+                evidence_1to2["y_shift"]["z"] + evidence_1to2["residual_shift"]["z"]
+            )
+            score_2to1 = (
+                evidence_2to1["y_shift"]["z"] + evidence_2to1["residual_shift"]["z"]
+            )
+            score_diff = score_1to2 - score_2to1
+
+            if abs(score_diff) >= 1.5:
                 confidence = "high"
-                evidence = effect_1to2
-            elif (
-                effect_2to1["evidence"] != "none"
-                and effect_1to2["evidence"] == "none"
-            ):
-                source, target = v2, v1
-                confidence = "high"
-                evidence = effect_2to1
-            elif (
-                effect_1to2["evidence"] != "none"
-                and effect_2to1["evidence"] != "none"
-            ):
-                if abs(effect_1to2["effect"]) > abs(effect_2to1["effect"]):
-                    source, target = v1, v2
-                    evidence = effect_1to2
-                else:
-                    source, target = v2, v1
-                    evidence = effect_2to1
+            elif abs(score_diff) >= 0.5:
                 confidence = "medium"
             else:
-                source, target = (v1, v2) if v1 < v2 else (v2, v1)
                 confidence = "low"
-                evidence = {
-                    "effect": 0,
-                    "p_value": 1.0,
-                    "n_environments": 0,
-                    "evidence": "none",
-                }
+
+            if score_diff > 0:
+                source, target = v1, v2
+                evidence = evidence_1to2
+                reverse_evidence = evidence_2to1
+            elif score_diff < 0:
+                source, target = v2, v1
+                evidence = evidence_2to1
+                reverse_evidence = evidence_1to2
+            else:
+                source, target = (v1, v2) if v1 < v2 else (v2, v1)
+                evidence = evidence_1to2
+                reverse_evidence = evidence_2to1
 
             directed_edges.append(
                 {
                     "source": source,
                     "target": target,
                     "direction_confidence": confidence,
-                    "intervention_effect": evidence["effect"],
-                    "intervention_p": evidence["p_value"],
-                    "intervention_evidence": evidence["evidence"],
-                    "n_intervention_envs": evidence["n_environments"],
+                    "intervention_effect": evidence["y_shift"]["effect"],
+                    "intervention_p": evidence["y_shift"]["p_value"],
+                    "intervention_evidence": evidence["y_shift"]["evidence"],
+                    "n_intervention_envs": evidence["y_shift"]["n_environments"],
+                    "intervention_residual_p": evidence["residual_shift"]["p_value"],
+                    "intervention_residual_evidence": evidence["residual_shift"]["evidence"],
+                    "intervention_score": score_1to2 if source == v1 else score_2to1,
+                    "intervention_reverse_score": score_2to1 if source == v1 else score_1to2,
+                    "intervention_valid_envs": [e["env"] for e in evidence["valid_envs"]],
+                    "intervention_reverse_valid_envs": [
+                        e["env"] for e in reverse_evidence["valid_envs"]
+                    ],
                 }
             )
 
@@ -457,9 +525,10 @@ class InterventionDirector:
 class IVAPCIEffectEstimator:
     """效应估计器"""
 
-    def __init__(self, config: PipelineConfig, models: Dict):
+    def __init__(self, config: PipelineConfig, models: Dict, intervention_map: Optional[Dict] = None):
         self.config = config
         self.models = models
+        self.intervention_map = intervention_map or {}
 
         self._pacdt_available = False
         try:
@@ -481,14 +550,26 @@ class IVAPCIEffectEstimator:
         use_pacd: bool = False,
     ) -> Dict:
         """估计直接效应（控制中介变量后）"""
-        n = len(data)
+        baseline_conditions = ["CD3CD28", "CD3CD28+ICAM2"]
+        candidate_envs = [
+            condition
+            for condition, info in (self.intervention_map or {}).items()
+            if source in info.get("targets", []) and target not in info.get("targets", [])
+        ]
+        if "COND" in data.columns and candidate_envs:
+            data_sub = data[data["COND"].isin(baseline_conditions + candidate_envs)]
+        else:
+            data_sub = data
 
-        A = (data[source].values > np.median(data[source].values)).astype(np.float32)
-        Y = data[target].values.astype(np.float32)
+        n = len(data_sub)
+        A = (data_sub[source].values > np.median(data_sub[source].values)).astype(
+            np.float32
+        )
+        Y = data_sub[target].values.astype(np.float32)
 
         if use_pacd and self._pacdt_available:
             try:
-                X_all = data[all_vars].values.astype(np.float32)
+                X_all = data_sub[all_vars].values.astype(np.float32)
                 result = self._estimate_pacd(
                     X_all,
                     A,
@@ -507,22 +588,29 @@ class IVAPCIEffectEstimator:
             except Exception as exc:
                 print(f"    PACD-T失败: {exc}")
 
-        x_vars = [source]
         w_vars = mediators if mediators else []
-        z_vars = [v for v in all_vars if v not in [source, target] + w_vars]
+        covariates = [v for v in all_vars if v not in [source, target] + w_vars]
 
-        if not z_vars:
-            z_vars = [source]
+        if covariates:
+            X_block = data_sub[covariates].values.astype(np.float32)
+        else:
+            X_block = np.zeros((n, 1), dtype=np.float32)
 
-        X_block = data[x_vars].values.astype(np.float32)
         W_block = (
-            data[w_vars].values.astype(np.float32)
+            data_sub[w_vars].values.astype(np.float32)
             if w_vars
             else np.zeros((n, 1), dtype=np.float32)
         )
-        Z_block = data[z_vars].values.astype(np.float32)
+        if "COND" in data_sub.columns and candidate_envs:
+            Z_env = data_sub["COND"].isin(candidate_envs).astype(np.float32).values
+        else:
+            Z_env = np.zeros(n, dtype=np.float32)
+        Z_block = Z_env.reshape(-1, 1)
 
         V_all = np.hstack([X_block, W_block, Z_block])
+        robustness = self._estimate_robustness(
+            data_sub, source, target, A, Y, Z_env, covariates
+        )
 
         if self.models.get("estimate_ivapci"):
             try:
@@ -544,11 +632,14 @@ class IVAPCIEffectEstimator:
                     "p_value": result["p_value"],
                     "method": "ivapci",
                     "diagnostics": result.get("diagnostics", {}),
+                    "robustness": robustness,
                 }
             except Exception:
                 pass
 
-        return self._simple_dr_estimate(data, source, target, w_vars)
+        fallback = self._simple_dr_estimate(data_sub, source, target, w_vars)
+        fallback["robustness"] = robustness
+        return fallback
 
     def estimate_total_effect(
         self,
@@ -610,6 +701,55 @@ class IVAPCIEffectEstimator:
             "p_value": float(p_value),
             "method": "simple_dr",
         }
+
+    def _estimate_robustness(
+        self,
+        data: pd.DataFrame,
+        source: str,
+        target: str,
+        A: np.ndarray,
+        Y: np.ndarray,
+        Z_env: np.ndarray,
+        covariates: List[str],
+    ) -> Dict:
+        robustness = {}
+        try:
+            if np.unique(Z_env).size > 1 and np.unique(A).size > 1:
+                robustness["z_auc_to_a"] = float(roc_auc_score(A, Z_env))
+            else:
+                robustness["z_auc_to_a"] = 0.5
+        except Exception:
+            robustness["z_auc_to_a"] = 0.5
+
+        if covariates:
+            X_cov = data[covariates].values
+        else:
+            X_cov = np.zeros((len(data), 1))
+        model = Ridge(alpha=0.1)
+        model.fit(np.column_stack([A, Z_env, X_cov]), Y)
+        residuals = Y - model.predict(np.column_stack([A, Z_env, X_cov]))
+        corr, p_corr = spearmanr(residuals, Z_env)
+        robustness["exclusion_corr"] = float(corr)
+        robustness["exclusion_p"] = float(p_corr)
+        robustness["exclusion_leak_flag"] = (
+            abs(corr) > 0.1 and p_corr < self.config.p_threshold
+        )
+
+        if "COND" in data.columns and self.intervention_map:
+            envs = data["COND"].unique().tolist()
+            taus = []
+            for env in envs:
+                subset = data[data["COND"] != env]
+                if len(subset) < 20:
+                    continue
+                tau = self._simple_dr_estimate(
+                    subset, source, target, covariates
+                )["tau"]
+                taus.append(tau)
+            robustness["loo_tau_std"] = float(np.std(taus)) if taus else 0.0
+        else:
+            robustness["loo_tau_std"] = 0.0
+        return robustness
 
     def mediation_analysis(
         self,
@@ -683,6 +823,10 @@ class GraphPruner:
             p_value = edge.get("p_direct", edge.get("p_total", 1.0))
             is_mediated = edge.get("is_mediated", False)
             indirect_ratio = edge.get("indirect_ratio", 0)
+            robustness = edge.get("robustness", {})
+            weak_iv = robustness.get("z_auc_to_a", 0.5) < 0.55
+            exclusion_leak = robustness.get("exclusion_leak_flag", False)
+            direction_confidence = edge.get("direction_confidence", "low")
 
             prune_reason = None
 
@@ -694,8 +838,14 @@ class GraphPruner:
                 prune_reason = (
                     f"not_significant (p={p_value:.4f} > {self.config.p_threshold})"
                 )
+            elif weak_iv:
+                prune_reason = "weak_iv (z_auc_to_a < 0.55)"
+            elif exclusion_leak:
+                prune_reason = "exclusion_leak"
             elif is_mediated and indirect_ratio > (1 - self.config.indirect_ratio):
                 prune_reason = f"indirect_edge (ratio={indirect_ratio:.2f})"
+            elif direction_confidence == "low" and p_value > self.config.p_threshold / 2:
+                prune_reason = "low_direction_confidence"
 
             if prune_reason:
                 edge["prune_reason"] = prune_reason
@@ -774,14 +924,19 @@ class PACDIVAPCIPipeline:
                 for edge in pacd_directed:
                     v1, v2 = edge["source"], edge["target"]
 
-                    int_evidence = director.get_intervention_effect(data, v1, v2)
-                    int_evidence_rev = director.get_intervention_effect(data, v2, v1)
+                    sepset = edge.get("sepset", [])
+                    int_evidence = director.get_direction_evidence(
+                        data, v1, v2, sepset
+                    )
+                    int_evidence_rev = director.get_direction_evidence(
+                        data, v2, v1, sepset
+                    )
 
                     pacd_conf = edge.get("direction_confidence", "low")
 
-                    if int_evidence["evidence"] in ["strong", "moderate"]:
+                    if int_evidence["y_shift"]["evidence"] in ["strong", "moderate"]:
                         final_conf = "high"
-                    elif int_evidence_rev["evidence"] in ["strong", "moderate"]:
+                    elif int_evidence_rev["y_shift"]["evidence"] in ["strong", "moderate"]:
                         v1, v2 = v2, v1
                         final_conf = "high"
                     else:
@@ -793,16 +948,32 @@ class PACDIVAPCIPipeline:
                             "target": v2,
                             "direction_confidence": final_conf,
                             "pacd_confidence": pacd_conf,
-                            "intervention_effect": int_evidence["effect"],
-                            "intervention_p": int_evidence["p_value"],
-                            "intervention_evidence": int_evidence["evidence"],
-                            "n_intervention_envs": int_evidence["n_environments"],
+                            "intervention_effect": int_evidence["y_shift"]["effect"],
+                            "intervention_p": int_evidence["y_shift"]["p_value"],
+                            "intervention_evidence": int_evidence["y_shift"]["evidence"],
+                            "n_intervention_envs": int_evidence["y_shift"]["n_environments"],
+                            "intervention_residual_p": int_evidence["residual_shift"][
+                                "p_value"
+                            ],
+                            "intervention_residual_evidence": int_evidence[
+                                "residual_shift"
+                            ]["evidence"],
+                            "intervention_score": int_evidence["y_shift"]["z"]
+                            + int_evidence["residual_shift"]["z"],
+                            "intervention_reverse_score": int_evidence_rev["y_shift"]["z"]
+                            + int_evidence_rev["residual_shift"]["z"],
+                            "intervention_valid_envs": [
+                                e["env"] for e in int_evidence["valid_envs"]
+                            ],
+                            "intervention_reverse_valid_envs": [
+                                e["env"] for e in int_evidence_rev["valid_envs"]
+                            ],
                             "sepset": edge.get("sepset", []),
                         }
                     )
             else:
                 self.directed_edges_ = director.orient_edges(
-                    data, self.skeleton_result_["skeleton"]
+                    data, self.skeleton_result_["skeleton"], self.skeleton_result_["sepsets"]
                 )
 
             high_conf = sum(
@@ -840,6 +1011,8 @@ class PACDIVAPCIPipeline:
         print("[Step 3] IVAPCI 效应估计")
         print("─" * 50)
 
+        self.effect_estimator.intervention_map = intervention_map
+
         sorted_edges = sorted(
             self.directed_edges_,
             key=lambda e: abs(e.get("intervention_effect", 0)),
@@ -852,11 +1025,7 @@ class PACDIVAPCIPipeline:
             source = edge["source"]
             target = edge["target"]
 
-            potential_mediators = [
-                e["target"]
-                for e in self.directed_edges_
-                if e["source"] == source and e["target"] != target
-            ]
+            potential_mediators = self._select_mediators(source, target)
 
             use_deep = idx < self.config.top_k_ivapci
             use_pacd = self.config.estimator == "pacd"
@@ -896,6 +1065,7 @@ class PACDIVAPCIPipeline:
                 "p_total": mediation["total_result"]["p_value"],
                 "p_direct": mediation["direct_result"]["p_value"],
                 "method": mediation["direct_result"]["method"],
+                "robustness": mediation["direct_result"].get("robustness", {}),
                 "mediators_controlled": mediation["mediators_controlled"],
                 "sepset": self.skeleton_result_["sepsets"].get(
                     f"{source}|{target}",
@@ -971,6 +1141,16 @@ class PACDIVAPCIPipeline:
                     "direction_confidence": e.get("direction_confidence", "medium"),
                     "is_mediated": e.get("is_mediated", False),
                     "sepset": e.get("sepset", []),
+                    "intervention": {
+                        "effect": e.get("intervention_effect", 0),
+                        "p_value": e.get("intervention_p", 1.0),
+                        "residual_p": e.get("intervention_residual_p", 1.0),
+                        "evidence": e.get("intervention_evidence", "none"),
+                        "residual_evidence": e.get("intervention_residual_evidence", "none"),
+                        "score": e.get("intervention_score", 0.0),
+                        "reverse_score": e.get("intervention_reverse_score", 0.0),
+                    },
+                    "robustness": e.get("robustness", {}),
                 }
                 for e in self.final_edges_
             ],
@@ -1039,6 +1219,30 @@ class PACDIVAPCIPipeline:
             for key, sepset in list(self.skeleton_result_["sepsets"].items())[:10]:
                 if sepset:
                     handle.write(f"- `{key}` | {', '.join(sepset)}\n")
+
+    def _select_mediators(self, source: str, target: str) -> List[str]:
+        candidates = [
+            edge["target"]
+            for edge in self.directed_edges_
+            if edge["source"] == source and edge["target"] != target
+        ]
+        mediators = []
+        for node in candidates:
+            has_path = any(
+                edge["source"] == node and edge["target"] == target
+                for edge in self.directed_edges_
+            )
+            if has_path:
+                mediators.append(node)
+
+        if not mediators and self.skeleton_result_:
+            sepset = self.skeleton_result_["sepsets"].get(
+                f"{source}|{target}",
+                self.skeleton_result_["sepsets"].get(f"{target}|{source}", []),
+            )
+            mediators.extend(sepset[:2])
+
+        return list(dict.fromkeys(mediators))
 
 
 # ============================================================
