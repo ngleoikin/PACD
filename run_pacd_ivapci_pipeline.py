@@ -38,7 +38,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.stats import mannwhitneyu, norm, spearmanr
+from scipy.stats import mannwhitneyu, norm, pearsonr, spearmanr
 from sklearn.linear_model import LogisticRegression, Ridge
 
 warnings.filterwarnings("ignore")
@@ -156,7 +156,10 @@ class PACDSkeletonLearner:
         n = X.shape[0]
 
         if not S:
-            r, _ = spearmanr(X[:, i], X[:, j])
+            if self.config.use_nonparanormal:
+                r, _ = pearsonr(X[:, i], X[:, j])
+            else:
+                r, _ = spearmanr(X[:, i], X[:, j])
             z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
             se = 1.0 / np.sqrt(n - 3)
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
@@ -168,7 +171,10 @@ class PACDSkeletonLearner:
         model_j = Ridge(alpha=0.01).fit(X_S, X[:, j])
         res_j = X[:, j] - model_j.predict(X_S)
 
-        r, _ = spearmanr(res_i, res_j)
+        if self.config.use_nonparanormal:
+            r, _ = pearsonr(res_i, res_j)
+        else:
+            r, _ = spearmanr(res_i, res_j)
         z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
         df = n - len(S) - 3
         se = 1.0 / np.sqrt(max(df, 1))
@@ -189,6 +195,8 @@ class PACDSkeletonLearner:
                 m=4,
                 alpha=self.config.alpha_ci,
                 max_k=self.config.max_k,
+                ci_method="pearson" if self.config.use_nonparanormal else "spearman",
+                use_nonparanormal=self.config.use_nonparanormal,
             )
             learner = self._PACDLearner(pacd_config)
             result = learner.learn(X, var_names)

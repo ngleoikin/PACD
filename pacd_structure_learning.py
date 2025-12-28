@@ -17,7 +17,7 @@ from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
-from scipy.stats import norm, spearmanr
+from scipy.stats import norm, pearsonr, spearmanr
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import KFold
@@ -34,6 +34,8 @@ class PACDStructureConfig:
     # CI检验参数
     alpha: float = 0.001
     max_k: int = 3
+    ci_method: str = "spearman"
+    use_nonparanormal: bool = False
 
     # 方向识别参数
     direction_threshold: float = 0.1
@@ -106,7 +108,10 @@ class PAdicCITest:
         n = X.shape[0]
 
         if not S:
-            r, _ = spearmanr(X[:, i], X[:, j])
+            if self.config.ci_method == "pearson":
+                r, _ = pearsonr(X[:, i], X[:, j])
+            else:
+                r, _ = spearmanr(X[:, i], X[:, j])
             z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
             se = 1.0 / np.sqrt(n - 3)
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
@@ -122,7 +127,10 @@ class PAdicCITest:
         model_j.fit(Phi_S, X[:, j])
         res_j = X[:, j] - model_j.predict(Phi_S)
 
-        r, _ = spearmanr(res_i, res_j)
+        if self.config.ci_method == "pearson":
+            r, _ = pearsonr(res_i, res_j)
+        else:
+            r, _ = spearmanr(res_i, res_j)
         z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
         df = max(n - len(S) - 3, 1)
         se = 1.0 / np.sqrt(df)
@@ -234,6 +242,8 @@ class PACDStructureLearner:
     def learn_skeleton(self, X: np.ndarray) -> Set[Tuple[int, int]]:
         """PC算法学习骨架 (使用 p-adic CI检验)"""
         _, d = X.shape
+        if self.config.use_nonparanormal:
+            X = self._nonparanormal_transform(X)
         edges = {(i, j) for i in range(d) for j in range(i + 1, d)}
 
         for k in range(self.config.max_k + 1):
@@ -257,6 +267,17 @@ class PACDStructureLearner:
 
         self.skeleton_ = edges
         return edges
+
+    def _nonparanormal_transform(self, X: np.ndarray) -> np.ndarray:
+        """Gaussian Copula变换"""
+        n, d = X.shape
+        X_transformed = np.zeros_like(X, dtype=float)
+        for j in range(d):
+            ranks = np.argsort(np.argsort(X[:, j])) + 1
+            delta = 1.0 / (4.0 * n**0.25)
+            ranks = np.clip(ranks / (n + 1), delta, 1 - delta)
+            X_transformed[:, j] = norm.ppf(ranks)
+        return X_transformed
 
     def orient_edges(self, X: np.ndarray, var_names: List[str]) -> List[Dict]:
         """使用 p-adic 方向识别定向边"""
