@@ -72,7 +72,7 @@ class PipelineConfig:
 
     # Step 4: 回灌剪枝
     effect_threshold: Optional[float] = None
-    effect_threshold_quantile: float = 0.6
+    effect_threshold_quantile: float = 0.3
     indirect_ratio: float = 0.3
     p_threshold: float = 0.05
 
@@ -729,11 +729,18 @@ class IVAPCIEffectEstimator:
         robustness = {}
         try:
             if np.unique(Z_env).size > 1 and np.unique(A).size > 1:
-                robustness["z_auc_to_a"] = float(roc_auc_score(A, Z_env))
+                auc = float(roc_auc_score(A, Z_env))
+                robustness["z_auc_to_a"] = auc
+                robustness["z_strength_to_a"] = max(auc, 1 - auc)
+                robustness["z_direction_to_a"] = 1 if auc >= 0.5 else -1
             else:
                 robustness["z_auc_to_a"] = 0.5
+                robustness["z_strength_to_a"] = 0.5
+                robustness["z_direction_to_a"] = 0
         except Exception:
             robustness["z_auc_to_a"] = 0.5
+            robustness["z_strength_to_a"] = 0.5
+            robustness["z_direction_to_a"] = 0
 
         if covariates:
             X_cov = data[covariates].values
@@ -745,9 +752,9 @@ class IVAPCIEffectEstimator:
         corr, p_corr = spearmanr(residuals, Z_env)
         robustness["exclusion_corr"] = float(corr)
         robustness["exclusion_p"] = float(p_corr)
-        robustness["exclusion_leak_flag"] = (
-            abs(corr) > 0.1 and p_corr < self.config.p_threshold
-        )
+            robustness["exclusion_leak_flag"] = (
+                abs(corr) > 0.1 and p_corr < self.config.p_threshold
+            )
 
         if "COND" in data.columns and self.intervention_map:
             envs = data["COND"].unique().tolist()
@@ -855,7 +862,7 @@ class GraphPruner:
             is_mediated = edge.get("is_mediated", False)
             indirect_ratio = edge.get("indirect_ratio", 0)
             robustness = edge.get("robustness", {})
-            weak_iv = robustness.get("z_auc_to_a", 0.5) < 0.55
+            weak_iv = robustness.get("z_strength_to_a", 0.5) < 0.55
             exclusion_leak = robustness.get("exclusion_leak_flag", False)
             direction_confidence = edge.get("direction_confidence", "low")
 
@@ -1090,6 +1097,7 @@ class PACDIVAPCIPipeline:
 
             print(f"  [{idx + 1}/{len(sorted_edges)}] {source} → {target} {method_hint}")
 
+            candidate_override = edge.get("intervention_valid_envs") or None
             mediation = self.effect_estimator.mediation_analysis(
                 data,
                 source,
@@ -1097,7 +1105,7 @@ class PACDIVAPCIPipeline:
                 potential_mediators,
                 var_names,
                 use_pacd=(use_deep and use_pacd),
-                candidate_envs_override=edge.get("intervention_valid_envs"),
+                candidate_envs_override=candidate_override,
             )
 
             result = {
