@@ -36,13 +36,23 @@ def _format_edge_table(df: pd.DataFrame, cols: List[str], limit: int = 20) -> st
     return _dataframe_to_markdown(view)
 
 
+def _format_cell(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, float) and (pd.isna(value) or pd.isnull(value)):
+        return "N/A"
+    if pd.isna(value):
+        return "N/A"
+    return str(value)
+
+
 def _dataframe_to_markdown(df: pd.DataFrame) -> str:
     headers = list(df.columns)
     rows = df.values.tolist()
     header_line = "| " + " | ".join(str(h) for h in headers) + " |"
     sep_line = "| " + " | ".join(["---"] * len(headers)) + " |"
     row_lines = [
-        "| " + " | ".join("" if pd.isna(v) else str(v) for v in row) + " |"
+        "| " + " | ".join(_format_cell(v) for v in row) + " |"
         for row in rows
     ]
     return "\n".join([header_line, sep_line, *row_lines]) + "\n"
@@ -60,6 +70,7 @@ def build_report(
     pacd_edges = _load_csv(pacd_dir / "final_edges.csv")
     pacd_pruned = _load_csv(pacd_dir / "pruned_edges.csv")
     pacd_graph = _load_json(pacd_dir / "causal_graph.json")
+    lines.append(f"_PACD directory: `{pacd_dir}`_\n")
     lines.append("## PACD Final Edges\n")
     lines.append(
         _format_edge_table(
@@ -85,12 +96,18 @@ def build_report(
     pc_skeleton = _load_csv(pc_dir / "skeleton.csv")
     pc_cpdag = _load_csv(pc_dir / "cpdag.csv")
     lines.append("## PC Baseline Summary\n")
+    lines.append(f"_PC directory: `{pc_dir}`_\n")
+    if pc_skeleton is None or pc_cpdag is None:
+        lines.append(
+            "_PC outputs missing. Run `run_pc_baseline.py` with causal-learn to generate them._\n"
+        )
     lines.append(f"- Skeleton edges: {0 if pc_skeleton is None else len(pc_skeleton)}\n")
     lines.append(f"- CPDAG edges: {0 if pc_cpdag is None else len(pc_cpdag)}\n")
 
     synthetic_summary = _load_json(synthetic_dir / "summary.json")
     if synthetic_summary:
         lines.append("## Synthetic Benchmark Summary\n")
+        lines.append(f"_Synthetic directory: `{synthetic_dir}`_\n")
         summary_rows = []
         for entry in synthetic_summary:
             pacd = entry.get("pacd", {})
