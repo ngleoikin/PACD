@@ -1,58 +1,57 @@
 # PACD
 
-## Testing & Baselines
+## 测试与基线
 
-### PACD-IVAPCI pipeline
+### PACD-IVAPCI 流水线
 
-Run the end-to-end pipeline:
+运行端到端流程：
 
 ```bash
 python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
 ```
 
-Key CLI options:
+常用参数：
 
-- `--alpha`: CI significance level
-- `--max-k`: maximum conditioning set size
-- `--estimator`: `ivapci`, `pacd`, or `simple`
-- `--epochs`: training epochs for IVAPCI/PACD-T
-- `--baseline-conds`: baseline conditions used for intervention evidence
-- `--effect-threshold`: fixed pruning threshold (defaults to quantile-based)
-- `--effect-quantile`: quantile-based pruning threshold
+- `--alpha`：CI 显著性水平
+- `--max-k`：最大条件集大小
+- `--estimator`：`ivapci`、`pacd` 或 `simple`
+- `--epochs`：IVAPCI/PACD-T 训练轮数
+- `--baseline-conds`：干预证据的基线条件（逗号分隔）
+- `--effect-threshold`：固定剪枝阈值（默认使用分位数）
+- `--effect-quantile`：分位数剪枝阈值
 
-### PC baseline
+### PC 基线
 
-If you have `causal-learn` available, run the PC baseline:
+如果已安装 `causal-learn`，运行 PC 基线：
 
 ```bash
 python run_pc_baseline.py --data sachs_data.csv --output results/pc --alpha 0.001 --max-k 3
 ```
 
-The PC baseline exports:
+PC 基线输出：
 
-- `skeleton.csv`: undirected edges
-- `cpdag.csv`: directed/undirected edges from the learned CPDAG
-- `pc_graph.json`: JSON representation for downstream comparison
+- `skeleton.csv`：无向骨架边
+- `cpdag.csv`：CPDAG 中的有向/无向边
+- `pc_graph.json`：用于对比的 JSON 结果
 
-If `causal-learn` is not installed, the script will print an installation hint and exit.
+未安装 `causal-learn` 时会提示安装并退出。
 
-### Synthetic benchmark (PACD vs PC)
+### 合成基准（PACD vs PC）
 
-Generate synthetic scenarios and compare PACD skeletons with PC:
+生成合成场景并对比骨架：
 
 ```bash
-python run_synthetic_benchmark.py --output results/synthetic --n 1000 --alpha 0.001 --max-k 3
+python run_synthetic_benchmark.py --output results/synthetic --n 1000 --n-vars 12 --alpha 0.001 --max-k 3
 ```
 
-Outputs:
-- per-scenario CSV data
-- ground-truth edges (`*_truth.json`)
-- summary metrics (`summary.json`)
+输出内容：
+- 每个场景的 CSV 数据
+- 真实边（`*_truth.json`）
+- 汇总指标（`summary.json`）
 
-### Results report
+### 结果报告
 
-Generate a Markdown report that summarizes PACD outputs, PC baseline outputs,
-and the synthetic benchmark summary:
+生成 PACD/PC/合成基准的 Markdown 报告：
 
 ```bash
 python run_results_report.py --pacd results/pacd --pc results/pc --synthetic results/synthetic --output results/report.md
