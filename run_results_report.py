@@ -33,7 +33,19 @@ def _format_edge_table(df: pd.DataFrame, cols: List[str], limit: int = 20) -> st
     if df is None or df.empty:
         return "_No data available._\n"
     view = df.loc[:, [c for c in cols if c in df.columns]].head(limit)
-    return view.to_markdown(index=False) + "\n"
+    return _dataframe_to_markdown(view)
+
+
+def _dataframe_to_markdown(df: pd.DataFrame) -> str:
+    headers = list(df.columns)
+    rows = df.values.tolist()
+    header_line = "| " + " | ".join(str(h) for h in headers) + " |"
+    sep_line = "| " + " | ".join(["---"] * len(headers)) + " |"
+    row_lines = [
+        "| " + " | ".join("" if pd.isna(v) else str(v) for v in row) + " |"
+        for row in rows
+    ]
+    return "\n".join([header_line, sep_line, *row_lines]) + "\n"
 
 
 def build_report(
@@ -94,8 +106,7 @@ def build_report(
                 }
             )
         summary_df = pd.DataFrame(summary_rows)
-        lines.append(summary_df.to_markdown(index=False))
-        lines.append("\n")
+        lines.append(_dataframe_to_markdown(summary_df))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
