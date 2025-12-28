@@ -548,14 +548,19 @@ class IVAPCIEffectEstimator:
         mediators: List[str],
         all_vars: List[str],
         use_pacd: bool = False,
+        candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """估计直接效应（控制中介变量后）"""
         baseline_conditions = ["CD3CD28", "CD3CD28+ICAM2"]
-        candidate_envs = [
-            condition
-            for condition, info in (self.intervention_map or {}).items()
-            if source in info.get("targets", []) and target not in info.get("targets", [])
-        ]
+        if candidate_envs_override is not None:
+            candidate_envs = candidate_envs_override
+        else:
+            candidate_envs = [
+                condition
+                for condition, info in (self.intervention_map or {}).items()
+                if source in info.get("targets", [])
+                and target not in info.get("targets", [])
+            ]
         if "COND" in data.columns and candidate_envs:
             data_sub = data[data["COND"].isin(baseline_conditions + candidate_envs)]
         else:
@@ -648,10 +653,17 @@ class IVAPCIEffectEstimator:
         target: str,
         all_vars: List[str],
         use_pacd: bool = False,
+        candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """估计总效应（不控制中介）"""
         return self.estimate_direct_effect(
-            data, source, target, [], all_vars, use_pacd=use_pacd
+            data,
+            source,
+            target,
+            [],
+            all_vars,
+            use_pacd=use_pacd,
+            candidate_envs_override=candidate_envs_override,
         )
 
     def _simple_dr_estimate(
@@ -759,10 +771,16 @@ class IVAPCIEffectEstimator:
         potential_mediators: List[str],
         all_vars: List[str],
         use_pacd: bool = False,
+        candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """中介分析"""
         total = self.estimate_total_effect(
-            data, source, target, all_vars, use_pacd=use_pacd
+            data,
+            source,
+            target,
+            all_vars,
+            use_pacd=use_pacd,
+            candidate_envs_override=candidate_envs_override,
         )
 
         if potential_mediators:
@@ -773,6 +791,7 @@ class IVAPCIEffectEstimator:
                 potential_mediators,
                 all_vars,
                 use_pacd=use_pacd,
+                candidate_envs_override=candidate_envs_override,
             )
         else:
             direct = total
@@ -934,12 +953,27 @@ class PACDIVAPCIPipeline:
 
                     pacd_conf = edge.get("direction_confidence", "low")
 
-                    if int_evidence["y_shift"]["evidence"] in ["strong", "moderate"]:
-                        final_conf = "high"
-                    elif int_evidence_rev["y_shift"]["evidence"] in ["strong", "moderate"]:
+                    score_f = (
+                        int_evidence["y_shift"]["z"]
+                        + int_evidence["residual_shift"]["z"]
+                    )
+                    score_r = (
+                        int_evidence_rev["y_shift"]["z"]
+                        + int_evidence_rev["residual_shift"]["z"]
+                    )
+                    if score_r - score_f > 0.5:
                         v1, v2 = v2, v1
+                        evidence, reverse_evidence = int_evidence_rev, int_evidence
                         final_conf = "high"
+                    elif score_f - score_r > 0.5:
+                        evidence, reverse_evidence = int_evidence, int_evidence_rev
+                        final_conf = (
+                            "high"
+                            if evidence["y_shift"]["evidence"] in ["strong", "moderate"]
+                            else pacd_conf
+                        )
                     else:
+                        evidence, reverse_evidence = int_evidence, int_evidence_rev
                         final_conf = pacd_conf
 
                     self.directed_edges_.append(
@@ -948,25 +982,27 @@ class PACDIVAPCIPipeline:
                             "target": v2,
                             "direction_confidence": final_conf,
                             "pacd_confidence": pacd_conf,
-                            "intervention_effect": int_evidence["y_shift"]["effect"],
-                            "intervention_p": int_evidence["y_shift"]["p_value"],
-                            "intervention_evidence": int_evidence["y_shift"]["evidence"],
-                            "n_intervention_envs": int_evidence["y_shift"]["n_environments"],
-                            "intervention_residual_p": int_evidence["residual_shift"][
+                            "intervention_effect": evidence["y_shift"]["effect"],
+                            "intervention_p": evidence["y_shift"]["p_value"],
+                            "intervention_evidence": evidence["y_shift"]["evidence"],
+                            "n_intervention_envs": evidence["y_shift"]["n_environments"],
+                            "intervention_residual_p": evidence["residual_shift"][
                                 "p_value"
                             ],
-                            "intervention_residual_evidence": int_evidence[
+                            "intervention_residual_evidence": evidence[
                                 "residual_shift"
                             ]["evidence"],
-                            "intervention_score": int_evidence["y_shift"]["z"]
-                            + int_evidence["residual_shift"]["z"],
-                            "intervention_reverse_score": int_evidence_rev["y_shift"]["z"]
-                            + int_evidence_rev["residual_shift"]["z"],
+                            "intervention_score": score_f
+                            if evidence is int_evidence
+                            else score_r,
+                            "intervention_reverse_score": score_r
+                            if evidence is int_evidence
+                            else score_f,
                             "intervention_valid_envs": [
-                                e["env"] for e in int_evidence["valid_envs"]
+                                e["env"] for e in evidence["valid_envs"]
                             ],
                             "intervention_reverse_valid_envs": [
-                                e["env"] for e in int_evidence_rev["valid_envs"]
+                                e["env"] for e in reverse_evidence["valid_envs"]
                             ],
                             "sepset": edge.get("sepset", []),
                         }
@@ -1049,6 +1085,7 @@ class PACDIVAPCIPipeline:
                 potential_mediators,
                 var_names,
                 use_pacd=(use_deep and use_pacd),
+                candidate_envs_override=edge.get("intervention_valid_envs"),
             )
 
             result = {
