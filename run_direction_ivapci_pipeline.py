@@ -66,7 +66,8 @@ def _estimate_ivapci_for_edge(
     epochs: int,
     n_bootstrap: int,
 ) -> Dict:
-    X_all = data.values.astype(np.float32)
+    covariates = [c for c in data.columns if c not in [source, target]]
+    X_all = data[covariates].values.astype(np.float32) if covariates else np.zeros((len(data), 1), dtype=np.float32)
     A = (data[source].values > np.median(data[source].values)).astype(np.float32)
     Y = data[target].values.astype(np.float32)
 
@@ -74,9 +75,9 @@ def _estimate_ivapci_for_edge(
         X_all,
         A,
         Y,
-        x_dim=1,
+        x_dim=0,
         w_dim=0,
-        z_dim=X_all.shape[1] - 1,
+        z_dim=X_all.shape[1],
         epochs=epochs,
         device=device,
         n_bootstrap=n_bootstrap,
