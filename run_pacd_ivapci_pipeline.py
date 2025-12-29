@@ -46,6 +46,17 @@ import torch
 warnings.filterwarnings("ignore")
 
 
+def _render_progress(current: int, total: int, prefix: str = "") -> None:
+    if total <= 0:
+        return
+    bar_len = 30
+    ratio = min(max(current / total, 0), 1)
+    filled = int(bar_len * ratio)
+    bar = "█" * filled + "·" * (bar_len - filled)
+    end = "\n" if current == total else "\r"
+    print(f"{prefix}[{bar}] {current}/{total}", end=end, flush=True)
+
+
 # ============================================================
 # 配置
 # ============================================================
@@ -1093,6 +1104,7 @@ class PACDIVAPCIPipeline:
 
         self.effect_results_ = []
 
+        total_edges = len(sorted_edges)
         for idx, edge in enumerate(sorted_edges):
             source = edge["source"]
             target = edge["target"]
@@ -1113,7 +1125,8 @@ class PACDIVAPCIPipeline:
             else:
                 method_hint = "(IPW)"
 
-            print(f"  [{idx + 1}/{len(sorted_edges)}] {source} → {target} {method_hint}")
+            _render_progress(idx, total_edges, prefix="  进度 ")
+            print(f"  [{idx + 1}/{total_edges}] {source} → {target} {method_hint}")
 
             candidate_override = edge.get("intervention_valid_envs") or None
             mediation = self.effect_estimator.mediation_analysis(
@@ -1158,6 +1171,7 @@ class PACDIVAPCIPipeline:
             )
             med_flag = " [间接]" if result["is_mediated"] else ""
             print(f"      τ_direct={result['tau_direct']:>7.2f} {sig}{med_flag}")
+            _render_progress(idx + 1, total_edges, prefix="  进度 ")
 
         print("\n" + "─" * 50)
         print("[Step 4] 回灌剪枝")
