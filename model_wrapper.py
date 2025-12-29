@@ -168,13 +168,28 @@ def load_ivapci():
         "ivapci.py",
     ]
 
-    preferred = Path.cwd() / "models" / "ivapci_v33_theory.py"
-    if not preferred.exists():
-        preferred = Path(__file__).parent / "models" / "ivapci_v33_theory.py"
-    filepath = preferred if preferred.exists() else _find_module(possible_names)
+    search_dirs = [
+        Path.cwd() / "models",
+        Path.cwd(),
+        Path.cwd().parent / "models",
+        Path(__file__).parent / "models",
+        Path(__file__).parent,
+    ]
+    filepath = None
+    for directory in search_dirs:
+        for name in possible_names:
+            candidate = directory / name
+            if candidate.exists():
+                filepath = candidate
+                break
+        if filepath is not None:
+            break
 
     if filepath is None:
-        _ivapci_error = f"找不到IVAPCI文件，已搜索: {possible_names}"
+        searched = ", ".join(str(p) for p in search_dirs)
+        _ivapci_error = (
+            f"找不到IVAPCI文件，已搜索: {possible_names} | dirs: {searched}"
+        )
         return None, None, _ivapci_error
 
     print(f"  ✓ 找到IVAPCI: {filepath}")
