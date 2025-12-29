@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import importlib.util
 import numpy as np
@@ -22,6 +22,7 @@ import pandas as pd
 
 from model_wrapper import estimate_ate_ivapci, is_ivapci_available, load_ivapci
 from pacd_structure_learning import PACDStructureConfig, PACDStructureLearner
+from run_pacd_ivapci_pipeline import InterventionDirector, PipelineConfig
 
 
 def _run_pc(data: np.ndarray, alpha: float, max_k: int):
@@ -67,6 +68,76 @@ def _print_edges(label: str, edges: List[Dict]) -> None:
     for edge in edges:
         marker = " (undirected)" if edge.get("undirected") else ""
         print(f"  - {edge['source']} -> {edge['target']}{marker}")
+
+
+def _default_intervention_map(
+    cond_values: List[str], baseline_conds: List[str], var_names: List[str]
+) -> Dict[str, Dict[str, List[str]]]:
+    return {
+        cond: {"targets": var_names}
+        for cond in cond_values
+        if cond not in baseline_conds
+    }
+
+
+def _apply_intervention_evidence(
+    data: pd.DataFrame,
+    directed_edges: List[Dict],
+    sepsets: Dict[str, List[str]],
+    baseline_conds: List[str],
+    intervention_map: Dict[str, Dict[str, List[str]]],
+) -> List[Dict]:
+    config = PipelineConfig(baseline_conditions=tuple(baseline_conds))
+    director = InterventionDirector(config, intervention_map)
+    updated_edges = []
+    for edge in directed_edges:
+        v1, v2 = edge["source"], edge["target"]
+        sepset = sepsets.get(f"{v1}|{v2}", sepsets.get(f"{v2}|{v1}", []))
+        evidence = director.get_direction_evidence(data, v1, v2, sepset)
+        reverse_evidence = director.get_direction_evidence(data, v2, v1, sepset)
+        score_f = evidence["y_shift"]["z"] + evidence["residual_shift"]["z"]
+        score_r = reverse_evidence["y_shift"]["z"] + reverse_evidence["residual_shift"]["z"]
+
+        if score_r - score_f > 0.5:
+            source, target = v2, v1
+            chosen = reverse_evidence
+            reverse = evidence
+            final_conf = "high"
+            score = score_r
+            reverse_score = score_f
+        elif score_f - score_r > 0.5:
+            source, target = v1, v2
+            chosen = evidence
+            reverse = reverse_evidence
+            final_conf = "high"
+            score = score_f
+            reverse_score = score_r
+        else:
+            source, target = v1, v2
+            chosen = evidence
+            reverse = reverse_evidence
+            final_conf = edge.get("direction_confidence", "pacd")
+            score = score_f
+            reverse_score = score_r
+
+        updated_edges.append(
+            {
+                **edge,
+                "source": source,
+                "target": target,
+                "direction_confidence": final_conf,
+                "intervention_effect": chosen["y_shift"]["effect"],
+                "intervention_p": chosen["y_shift"]["p_value"],
+                "intervention_residual_p": chosen["residual_shift"]["p_value"],
+                "intervention_score": score,
+                "intervention_reverse_score": reverse_score,
+                "intervention_valid_envs": [env["env"] for env in chosen["valid_envs"]],
+                "intervention_reverse_valid_envs": [
+                    env["env"] for env in reverse["valid_envs"]
+                ],
+            }
+        )
+    return updated_edges
 
 
 def _estimate_ivapci_for_edge(
@@ -141,6 +212,16 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=80, help="IVAPCI training epochs")
     parser.add_argument("--device", default="cpu", help="Device (cpu/cuda)")
     parser.add_argument("--n-bootstrap", type=int, default=50, help="Bootstrap samples")
+    parser.add_argument(
+        "--baseline-conds",
+        default="",
+        help="Comma-separated baseline COND values for intervention evidence (e.g. env_0)",
+    )
+    parser.add_argument(
+        "--intervention",
+        default=None,
+        help="JSON file for intervention map (optional)",
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.data)
@@ -156,6 +237,30 @@ def main() -> None:
         learner = PACDStructureLearner(config)
         result = learner.learn(data.values, var_names)
         directed_edges = result["directed_edges"]
+        if "COND" in df.columns:
+            baseline_conds = [
+                item.strip()
+                for item in args.baseline_conds.split(",")
+                if item.strip()
+            ]
+            if not baseline_conds:
+                baseline_conds = list(PipelineConfig().baseline_conditions)
+            if args.intervention:
+                with open(args.intervention, "r", encoding="utf-8") as handle:
+                    intervention_map = json.load(handle)
+            else:
+                intervention_map = _default_intervention_map(
+                    sorted(df["COND"].astype(str).unique()),
+                    baseline_conds,
+                    var_names,
+                )
+            directed_edges = _apply_intervention_evidence(
+                df,
+                directed_edges,
+                result.get("sepsets", {}),
+                baseline_conds,
+                intervention_map,
+            )
     else:
         pc_result = _run_pc(data.values, args.alpha, args.max_k)
         directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
