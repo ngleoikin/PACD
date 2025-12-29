@@ -77,11 +77,15 @@ def _estimate_ivapci_for_edge(
     if X_all.shape[1] == 0:
         X_all = np.zeros((len(data), 1), dtype=np.float32)
 
+    d_all = X_all.shape[1]
+    if d_all < 3:
+        extra = np.repeat(X_all[:, [-1]], 3 - d_all, axis=1)
+        X_all = np.concatenate([X_all, extra], axis=1)
+        d_all = X_all.shape[1]
+
     x_dim = 1
-    w_dim = 0
-    z_dim = max(X_all.shape[1] - 1, 0)
-    if z_dim == 0:
-        z_dim = X_all.shape[1]
+    w_dim = max(1, (d_all - x_dim) // 2)
+    z_dim = d_all - x_dim - w_dim
 
     result = estimate_ate_ivapci(
         X_all,
