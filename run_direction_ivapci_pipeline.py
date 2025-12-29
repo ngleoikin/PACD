@@ -66,11 +66,18 @@ def _estimate_ivapci_for_edge(
     epochs: int,
     n_bootstrap: int,
 ) -> Dict:
-    covariates = [c for c in data.columns if c not in [source, target]]
-    if covariates:
-        X_all = data[covariates].values.astype(np.float32)
-    else:
-        X_all = np.zeros((len(data), 1), dtype=np.float32)
+    env_cols = []
+    if "COND" in data.columns:
+        env_cols = list(pd.get_dummies(data["COND"], prefix="E", drop_first=True).columns)
+
+    covariates = [c for c in data.columns if c not in [source, target, "COND"]]
+    X_env = (
+        pd.get_dummies(data["COND"], prefix="E", drop_first=True).values.astype(np.float32)
+        if env_cols
+        else np.zeros((len(data), 0), dtype=np.float32)
+    )
+    X_cov = data[covariates].values.astype(np.float32) if covariates else np.zeros((len(data), 1), dtype=np.float32)
+    X_all = np.concatenate([X_env, X_cov], axis=1) if X_env.size else X_cov
     A = (data[source].values > np.median(data[source].values)).astype(np.float32)
     Y = data[target].values.astype(np.float32)
 
@@ -83,7 +90,7 @@ def _estimate_ivapci_for_edge(
         X_all = np.concatenate([X_all, extra], axis=1)
         d_all = X_all.shape[1]
 
-    x_dim = 1
+    x_dim = max(1, X_env.shape[1])
     w_dim = max(1, (d_all - x_dim) // 2)
     z_dim = d_all - x_dim - w_dim
 
