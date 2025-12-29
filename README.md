@@ -91,3 +91,15 @@ python run_synthetic_benchmark.py --output results/synthetic --n 1000 --n-vars 1
 ```bash
 python run_results_report.py --pacd results/pacd --pc results/pc --synthetic results/synthetic --output results/report.md
 ```
+
+### 定向 + IVAPCI 效应管线
+
+使用 PC 或 PACD 定向，然后用 IVAPCI 估计每条边效应：
+
+```bash
+python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/dir_ivapci --direction pacd
+```
+
+输出：
+- `edge_effects.csv`
+- `edge_effects.json`
