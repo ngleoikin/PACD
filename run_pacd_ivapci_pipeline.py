@@ -1126,7 +1126,7 @@ class PACDIVAPCIPipeline:
                 method_hint = "(IPW)"
 
             _render_progress(idx, total_edges, prefix="  进度 ")
-            print(f"  [{idx + 1}/{total_edges}] {source} → {target} {method_hint}")
+            print(f"\n  [{idx + 1}/{total_edges}] {source} → {target} {method_hint}")
 
             candidate_override = edge.get("intervention_valid_envs") or None
             mediation = self.effect_estimator.mediation_analysis(
@@ -1172,6 +1172,7 @@ class PACDIVAPCIPipeline:
             med_flag = " [间接]" if result["is_mediated"] else ""
             print(f"      τ_direct={result['tau_direct']:>7.2f} {sig}{med_flag}")
             _render_progress(idx + 1, total_edges, prefix="  进度 ")
+            print()
 
         print("\n" + "─" * 50)
         print("[Step 4] 回灌剪枝")
