@@ -19,6 +19,28 @@ python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
 - `--baseline-conds`：干预证据的基线条件（逗号分隔）
 - `--effect-threshold`：固定剪枝阈值（默认使用分位数）
 - `--effect-quantile`：分位数剪枝阈值
+- `--device`：计算设备（`auto`/`cpu`/`cuda`）
+
+#### 激活多环境信号（COND）
+
+当数据包含 `COND` 列时：
+
+- 如果未提供干预映射文件，脚本会自动将 `COND` 中非基线条件视为干预环境；
+- `--baseline-conds` 用于指定哪些条件属于基线（默认 `CD3CD28,CD3CD28+ICAM2`）。
+
+示例：
+
+```bash
+python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd --baseline-conds CD3CD28,CD3CD28+ICAM2
+```
+
+#### 启用 GPU
+
+默认 `--device auto` 会在有 GPU 时使用 `cuda`，否则回退到 `cpu`。
+
+```bash
+python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd --device cuda
+```
 
 ### PC 基线
 
