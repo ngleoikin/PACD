@@ -282,6 +282,7 @@ class PAdicDirectionIdentifier:
     def compute_residual_dependence(self, X: np.ndarray, Y: np.ndarray) -> float:
         """估计残差与输入的相关性（越小越符合因果方向）"""
         X = X.reshape(-1, 1) if X.ndim == 1 else X
+        self.mapper.fit(X)
         Phi_X = self.mapper.transform(X)
         model = Ridge(alpha=self.config.direction_ridge_alpha)
         model.fit(Phi_X, Y)
@@ -443,6 +444,10 @@ class PACDStructureLearner:
     ) -> bool:
         """尝试定向 src->dst；若已存在 dst->src 则不做变更"""
         if (dst, src) in directed:
+            return False
+        if getattr(self.config, "ensure_acyclic", True) and self._would_create_cycle(
+            directed, src, dst
+        ):
             return False
         u, v = (src, dst) if src < dst else (dst, src)
         undirected.discard((u, v))
@@ -654,12 +659,17 @@ class PACDStructureLearner:
             f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
             for (i, j), S in self.sepsets_.items()
         }
+        directed_count = sum(
+            1 for edge in directed if edge.get("orientation_method") != "undirected"
+        )
+        undirected_count = len(directed) - directed_count
         return {
             "skeleton": [(var_names[i], var_names[j]) for (i, j) in skeleton],
             "skeleton_indices": list(skeleton),
             "directed_edges": directed,
             "sepsets": sepsets_named,
-            "n_edges": len(directed),
+            "n_edges": directed_count,
+            "n_undirected": undirected_count,
             "sensitivity_analysis": sensitivity,
         }
 
@@ -690,8 +700,8 @@ class PACDStructureLearner:
                 learner = PACDStructureLearner(cfg2)
                 out = learner.learn(X, var_names)
                 total += 1
-                for e in out.get("skeleton_edges", []):
-                    k = tuple(sorted((e["node1"], e["node2"])))
+                for e in out.get("skeleton", []):
+                    k = tuple(sorted(e))
                     edge_counts[k] = edge_counts.get(k, 0) + 1
                 for e in out.get("directed_edges", []):
                     if e.get("orientation_method") == "undirected":
