@@ -127,6 +127,7 @@ def build_report(
                 {
                     "scenario": entry.get("scenario"),
                     "n": entry.get("n"),
+                    "pc_available": entry.get("pc_available"),
                     "pacd_f1": pacd.get("f1"),
                     "pc_f1": pc.get("f1") if pc else None,
                     "pacd_shd": pacd.get("shd"),
@@ -135,6 +136,10 @@ def build_report(
             )
         summary_df = pd.DataFrame(summary_rows)
         lines.append(_dataframe_to_markdown(summary_df))
+        if any(entry.get("pc_available") is False for entry in synthetic_summary):
+            lines.append(
+                "_PC results show N/A when causal-learn is unavailable during synthetic runs._\n"
+            )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
