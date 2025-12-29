@@ -113,7 +113,8 @@ def load_pacd():
         "pacd_t.py",
     ]
 
-    filepath = _find_module(possible_names)
+    preferred = Path(__file__).parent / "models" / "ivapci_v33_theory.py"
+    filepath = preferred if preferred.exists() else _find_module(possible_names)
 
     if filepath is None:
         _pacd_error = f"找不到PACD文件，已搜索: {possible_names}"
