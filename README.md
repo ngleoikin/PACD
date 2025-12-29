@@ -28,6 +28,17 @@ python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
 - 如果未提供干预映射文件，脚本会自动将 `COND` 中非基线条件视为干预环境；
 - `--baseline-conds` 用于指定哪些条件属于基线（默认 `CD3CD28,CD3CD28+ICAM2`）。
 
+**基线环境解释：**
+`COND` 列中被视为“未干预/对照”的条件集合。它们用于：
+1) 作为干预效应比较的参照分布；
+2) 自动构建干预映射时，排除这些条件（仅将非基线条件视为干预）。
+
+如果你的数据中没有 `CD3CD28` 或 `CD3CD28+ICAM2`，请显式传入你的基线条件，例如：
+
+```bash
+python run_pacd_ivapci_pipeline.py --data your_data.csv --output results/pacd --baseline-conds controlA,controlB
+```
+
 示例：
 
 ```bash
