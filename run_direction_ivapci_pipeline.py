@@ -43,19 +43,30 @@ def _directed_edges_from_pc(graph, var_names: List[str]) -> List[Dict]:
             endpoints = edge.get_endpoint1().name + edge.get_endpoint2().name
             if endpoints == "TAIL-ARROW":
                 source, target = var_names[i], var_names[j]
+                undirected = False
             elif endpoints == "ARROW-TAIL":
                 source, target = var_names[j], var_names[i]
+                undirected = False
             else:
-                continue
+                source, target = var_names[i], var_names[j]
+                undirected = True
             edges.append(
                 {
                     "source": source,
                     "target": target,
-                    "direction_confidence": "pc",
+                    "direction_confidence": "pc_directed" if not undirected else "pc_undirected",
                     "endpoints": endpoints,
+                    "undirected": undirected,
                 }
             )
     return edges
+
+
+def _print_edges(label: str, edges: List[Dict]) -> None:
+    print(f"[{label}] edges = {len(edges)}")
+    for edge in edges:
+        marker = " (undirected)" if edge.get("undirected") else ""
+        print(f"  - {edge['source']} -> {edge['target']}{marker}")
 
 
 def _estimate_ivapci_for_edge(
@@ -148,7 +159,8 @@ def main() -> None:
     else:
         pc_result = _run_pc(data.values, args.alpha, args.max_k)
         directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
-        print(f"[PC] directed edges = {len(directed_edges)}")
+
+    _print_edges(args.direction.upper(), directed_edges)
 
     if not is_ivapci_available():
         _, _, err = load_ivapci()
