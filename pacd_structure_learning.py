@@ -358,6 +358,7 @@ class PACDStructureLearner:
         self.sepsets_: Dict[Tuple[int, int], List[int]] = {}
         self.directions_: Dict[Tuple[int, int], Dict] = {}
         self.edge_pvalues_: Dict[Tuple[int, int], float] = {}
+        self.edge_pvalues_sep_: Dict[Tuple[int, int], float] = {}
 
     def _neighbors(self, edges: Set[Tuple[int, int]], node: int, exclude: int) -> Set[int]:
         neighbors: Set[int] = set()
@@ -401,6 +402,8 @@ class PACDStructureLearner:
                         to_remove.append((i, j))
                         self.sepsets_[(i, j)] = list(S)
                         self.sepsets_[(j, i)] = list(S)
+                        self.edge_pvalues_sep_[(i, j)] = float(p)
+                        self.edge_pvalues_sep_[(j, i)] = float(p)
                         break
                 if (i, j) not in to_remove:
                     _, _, p = self.ci_tester.test_partial_correlation(X, i, j, [])
@@ -552,26 +555,25 @@ class PACDStructureLearner:
         directed: Set[Tuple[int, int]],
         edge_meta: Dict[Tuple[int, int], str],
         residual_weight: float,
-    ) -> Dict[Tuple[int, int], Dict]:
+    ) -> Tuple[Dict[Tuple[int, int], Dict], Dict[Tuple[int, int], Dict]]:
         """对剩余未定向边用风险比较补完；返回这些边的 risk 结果"""
         risk_results: Dict[Tuple[int, int], Dict] = {}
+        risk_cache: Dict[Tuple[int, int], Dict] = {}
         for (u, v) in sorted(undirected):
             res = self.direction_identifier.identify_direction(
                 X[:, u], X[:, v], var_names[u], var_names[v], residual_weight=residual_weight
             )
+            risk_cache[(u, v)] = res
             # undecided 直接跳过（保持无向，不输出为有向边）
             if "--" in res.get("direction", ""):
                 continue
             src_name, dst_name = res["source"], res["target"]
             src = u if src_name == var_names[u] else v
             dst = v if src == u else u
-            if getattr(self.config, "ensure_acyclic", True) and self._would_create_cycle(directed, src, dst):
-                # 该方向会成环：保留无向（不强行翻转，以免引入无依据方向）
-                continue
             if self._orient_edge(src, dst, undirected, directed):
                 edge_meta[(src, dst)] = "risk"
                 risk_results[(src, dst)] = res
-        return risk_results
+        return risk_results, risk_cache
 
     def _orient_edges_global(
         self, X: np.ndarray, var_names: List[str], residual_weight: float = 0.0
@@ -586,7 +588,7 @@ class PACDStructureLearner:
         # 2) Meek rules propagation
         self._apply_meek_rules(d, undirected, directed, edge_meta)
         # 3) risk-based completion (optional)
-        risk_results = self._orient_remaining_by_risk(
+        risk_results, risk_cache = self._orient_remaining_by_risk(
             X, var_names, undirected, directed, edge_meta, residual_weight=residual_weight
         )
 
@@ -625,8 +627,11 @@ class PACDStructureLearner:
         # 对剩余无向边：保留为“未决定”输出（不强行定向），但仍给出 risk/dep 指标供人工判断
         for (u, v) in sorted(undirected):
             sepset_idx = self.sepsets_.get((u, v)) or self.sepsets_.get((v, u)) or []
-            rr = self.direction_identifier.identify_direction(
-                X[:, u], X[:, v], var_names[u], var_names[v], residual_weight=residual_weight
+            rr = risk_cache.get(
+                (u, v),
+                self.direction_identifier.identify_direction(
+                    X[:, u], X[:, v], var_names[u], var_names[v], residual_weight=residual_weight
+                ),
             )
             directed_edges.append(
                 {
@@ -742,6 +747,41 @@ class PACDEnsembleStructureLearner(PACDStructureLearner):
     def _bootstrap_indices(self, n: int) -> np.ndarray:
         return self._rng.integers(0, n, size=n)
 
+    def _compute_sepsets_for_graph(
+        self, X: np.ndarray, edges: Set[Tuple[int, int]]
+    ) -> None:
+        n, d = X.shape
+        self.sepsets_.clear()
+        self.edge_pvalues_sep_.clear()
+        if getattr(self.config, "cache_padic_features", True):
+            try:
+                self.ci_tester.mapper.fit(X)
+                phi_all = self.ci_tester.mapper.transform(X)
+            except Exception:
+                phi_all = None
+            self.ci_tester.set_cache(phi_all)
+        else:
+            self.ci_tester.set_cache(None)
+
+        for k in range(self.config.max_k + 1):
+            for i in range(d):
+                for j in range(i + 1, d):
+                    if (i, j) in edges or (i, j) in self.sepsets_:
+                        continue
+                    neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
+                    if len(neighbors) < k:
+                        continue
+                    for S in combinations(neighbors, k):
+                        is_indep, _, p = self.ci_tester.test_partial_correlation(X, i, j, list(S))
+                        if is_indep:
+                            self.sepsets_[(i, j)] = list(S)
+                            self.sepsets_[(j, i)] = list(S)
+                            self.edge_pvalues_sep_[(i, j)] = float(p)
+                            self.edge_pvalues_sep_[(j, i)] = float(p)
+                            break
+
+        self.ci_tester.set_cache(None)
+
     def learn_skeleton(self, X: np.ndarray) -> Set[Tuple[int, int]]:
         n, d = X.shape
         edge_counts = np.zeros((d, d), dtype=int)
@@ -764,14 +804,8 @@ class PACDEnsembleStructureLearner(PACDStructureLearner):
         }
 
         self.skeleton_ = stable_edges
-        # 为后续 v-structure / Meek 定向准备：在原始数据上再跑一次 PC，拿到 sepsets_（不改变稳定骨架）
-        try:
-            tmp = PACDStructureLearner(self.config)
-            tmp.learn_skeleton(X)
-            self.sepsets_ = tmp.sepsets_
-            self.edge_pvalues_ = tmp.edge_pvalues_
-        except Exception:
-            pass
+        # 基于稳定骨架补跑 sepset，避免与 bootstrap 路径不一致
+        self._compute_sepsets_for_graph(X, stable_edges)
         return stable_edges
 
     def orient_edges(self, X: np.ndarray, var_names: List[str]) -> List[Dict]:
