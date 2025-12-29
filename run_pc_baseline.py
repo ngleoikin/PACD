@@ -85,18 +85,46 @@ def main() -> None:
         os.path.join(args.output, "cpdag.csv"), index=False
     )
 
-    with open(os.path.join(args.output, "pc_graph.json"), "w", encoding="utf-8") as handle:
-        json.dump(
+    edges = []
+    for node_i, node_j, endpoints in cpdag:
+        if endpoints == "ARROW-ARROW":
+            source, target = node_i, node_j
+        elif endpoints == "TAIL-ARROW":
+            source, target = node_i, node_j
+        elif endpoints == "ARROW-TAIL":
+            source, target = node_j, node_i
+        else:
+            source, target = node_i, node_j
+        edges.append(
             {
-                "nodes": var_names,
-                "skeleton": skeleton,
-                "cpdag": cpdag,
-                "alpha": args.alpha,
-                "max_k": args.max_k,
-            },
-            handle,
-            indent=2,
+                "source": source,
+                "target": target,
+                "weight": 1.0,
+                "ci": None,
+                "p_value": None,
+                "direction_confidence": "pc",
+                "is_mediated": False,
+                "sepset": [],
+                "intervention": {},
+                "robustness": {},
+            }
         )
+
+    pacd_like = {
+        "nodes": var_names,
+        "edges": edges,
+        "pruned_edges": [],
+        "sepsets": {},
+        "meta": {
+            "alpha": args.alpha,
+            "max_k": args.max_k,
+            "cpdag": cpdag,
+            "skeleton": skeleton,
+        },
+    }
+
+    with open(os.path.join(args.output, "pc_graph.json"), "w", encoding="utf-8") as handle:
+        json.dump(pacd_like, handle, indent=2)
 
     print(f"Saved PC baseline to {args.output}/")
 
