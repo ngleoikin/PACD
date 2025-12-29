@@ -97,6 +97,10 @@ def load_pacd():
 
     _pacd_initialized = True
 
+    cwd = str(Path.cwd())
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
     try:
         from models.pacdt_v30 import PACDTv30Estimator, PACDTConfig
         _pacd_estimator = PACDTv30Estimator
@@ -113,7 +117,9 @@ def load_pacd():
         "pacd_t.py",
     ]
 
-    preferred = Path(__file__).parent / "models" / "ivapci_v33_theory.py"
+    preferred = Path.cwd() / "models" / "pacdt_v30.py"
+    if not preferred.exists():
+        preferred = Path(__file__).parent / "models" / "pacdt_v30.py"
     filepath = preferred if preferred.exists() else _find_module(possible_names)
 
     if filepath is None:
@@ -141,6 +147,10 @@ def load_ivapci():
 
     _ivapci_initialized = True
 
+    cwd = str(Path.cwd())
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
     try:
         from models.ivapci_v33_theory import (
             IVAPCIv33TheoryHierEstimator,
@@ -158,7 +168,10 @@ def load_ivapci():
         "ivapci.py",
     ]
 
-    filepath = _find_module(possible_names)
+    preferred = Path.cwd() / "models" / "ivapci_v33_theory.py"
+    if not preferred.exists():
+        preferred = Path(__file__).parent / "models" / "ivapci_v33_theory.py"
+    filepath = preferred if preferred.exists() else _find_module(possible_names)
 
     if filepath is None:
         _ivapci_error = f"找不到IVAPCI文件，已搜索: {possible_names}"
