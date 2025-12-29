@@ -280,8 +280,9 @@ def main() -> None:
             df_out["COND"] = [f"env_{env}" for env in envs]
             output_prefix = f"{name}_{level}"
             df_out.to_csv(output_dir / f"{output_prefix}.csv", index=False)
+            effects_out = {f"{src}->{tgt}": weight for (src, tgt), weight in edge_effects.items()}
             with open(output_dir / f"{output_prefix}_truth.json", "w", encoding="utf-8") as handle:
-                json.dump({"edges": true_edges, "effects": edge_effects}, handle, indent=2)
+                json.dump({"edges": true_edges, "effects": effects_out}, handle, indent=2)
             truth_graph = {
                 "nodes": var_names,
                 "edges": [
