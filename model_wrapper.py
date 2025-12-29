@@ -97,6 +97,14 @@ def load_pacd():
 
     _pacd_initialized = True
 
+    try:
+        from models.pacdt_v30 import PACDTv30Estimator, PACDTConfig
+        _pacd_estimator = PACDTv30Estimator
+        _pacd_config = PACDTConfig
+        return _pacd_estimator, _pacd_config, None
+    except Exception as exc:
+        _pacd_error = f"直接import失败: {exc}"
+
     possible_names = [
         "pacdt_v30.py",
         "pacdt_v30_3.py",
@@ -131,6 +139,17 @@ def load_ivapci():
         return _ivapci_estimator, _ivapci_config, _ivapci_error
 
     _ivapci_initialized = True
+
+    try:
+        from models.ivapci_v33_theory import (
+            IVAPCIv33TheoryHierEstimator,
+            IVAPCIV33TheoryConfig,
+        )
+        _ivapci_estimator = IVAPCIv33TheoryHierEstimator
+        _ivapci_config = IVAPCIV33TheoryConfig
+        return _ivapci_estimator, _ivapci_config, None
+    except Exception as exc:
+        _ivapci_error = f"直接import失败: {exc}"
 
     possible_names = [
         "ivapci_v33_theory.py",
