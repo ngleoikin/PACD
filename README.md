@@ -107,12 +107,40 @@ python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/d
 - `--epochs`：IVAPCI 训练轮数
 - `--device`：计算设备（`cpu`/`cuda`）
 - `--n-bootstrap`：bootstrap 次数
+- `--baseline-conds`：多环境基线条件（逗号分隔）
+- `--intervention`：干预映射 JSON 文件（可选）
 
 多环境数据（含 `COND`）使用说明：
 
 - 脚本会自动将 `COND` one-hot 作为 **X 块**输入 IVAPCI，以吸收环境漂移；
 - 若 `COND` 为字符串列，依然可直接读取并编码；
 - 建议合成数据的基线环境设置为 `env_0`（例如 `--baseline-conds env_0`）。
+
+当 `--direction pacd` 且数据包含 `COND` 时，脚本会像主流水线一样使用多环境干预证据：
+
+- `--baseline-conds` 指定基线环境（默认 `CD3CD28,CD3CD28+ICAM2`）
+- `--intervention` 指向干预映射 JSON（若不提供，会把非基线环境视为干预）
+
+示例（合成数据）：
+
+```bash
+python run_direction_ivapci_pipeline.py \
+  --data multienv_soft_high.csv \
+  --output results/dir_ivapci \
+  --direction pacd \
+  --baseline-conds env_0
+```
+
+示例（自定义干预映射）：
+
+```bash
+python run_direction_ivapci_pipeline.py \
+  --data sachs_data.csv \
+  --output results/dir_ivapci \
+  --direction pacd \
+  --baseline-conds CD3CD28,CD3CD28+ICAM2 \
+  --intervention sachs_intervention_map.json
+```
 
 输出：
 - `edge_effects.csv`
