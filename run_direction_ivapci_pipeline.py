@@ -96,8 +96,15 @@ def _estimate_ivapci_for_edge(
         d_all = X_all.shape[1]
 
     x_dim = max(1, X_env.shape[1])
-    w_dim = max(1, (d_all - x_dim) // 2)
-    z_dim = d_all - x_dim - w_dim
+    remaining = d_all - x_dim
+    if remaining < 2:
+        x_dim = max(1, d_all - 2)
+        remaining = d_all - x_dim
+    w_dim = max(1, remaining // 2)
+    z_dim = remaining - w_dim
+    if z_dim < 1:
+        z_dim = 1
+        w_dim = max(1, remaining - z_dim)
 
     result = estimate_ate_ivapci(
         X_all,
@@ -141,6 +148,7 @@ def main() -> None:
     else:
         pc_result = _run_pc(data.values, args.alpha, args.max_k)
         directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
+        print(f"[PC] directed edges = {len(directed_edges)}")
 
     if not is_ivapci_available():
         _, _, err = load_ivapci()
@@ -150,6 +158,7 @@ def main() -> None:
     for edge in directed_edges:
         source = edge["source"]
         target = edge["target"]
+        print(f"[IVAPCI] {source} -> {target} ...")
         effect = _estimate_ivapci_for_edge(
             df, source, target, device=args.device, epochs=args.epochs, n_bootstrap=args.n_bootstrap
         )
