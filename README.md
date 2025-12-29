@@ -50,6 +50,8 @@ python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd -
 python run_pc_baseline.py --data sachs_data.csv --output results/pc --alpha 0.001 --max-k 3
 ```
 
+提示：`run_pc_baseline.py` 会自动跳过非数值列（如 `COND`），并将结果写为 PACD 兼容的 JSON 格式（`pc_graph.json`），方便与 PACD 结果一起可视化对比。
+
 PC 基线输出：
 
 - `skeleton.csv`：无向骨架边
