@@ -100,6 +100,20 @@ python run_results_report.py --pacd results/pacd --pc results/pc --synthetic res
 python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/dir_ivapci --direction pacd
 ```
 
+常用参数：
+
+- `--direction`：`pc` 或 `pacd`
+- `--alpha` / `--max-k`：结构学习参数
+- `--epochs`：IVAPCI 训练轮数
+- `--device`：计算设备（`cpu`/`cuda`）
+- `--n-bootstrap`：bootstrap 次数
+
+多环境数据（含 `COND`）使用说明：
+
+- 脚本会自动将 `COND` one-hot 作为 **X 块**输入 IVAPCI，以吸收环境漂移；
+- 若 `COND` 为字符串列，依然可直接读取并编码；
+- 建议合成数据的基线环境设置为 `env_0`（例如 `--baseline-conds env_0`）。
+
 输出：
 - `edge_effects.csv`
 - `edge_effects.json`
