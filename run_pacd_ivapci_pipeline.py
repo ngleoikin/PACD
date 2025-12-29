@@ -1225,11 +1225,21 @@ class PACDIVAPCIPipeline:
         df_pruned = pd.DataFrame(self.pruned_edges_)
         df_pruned.to_csv(f"{output_dir}/pruned_edges.csv", index=False)
 
+        nodes = set()
+        for edge in self.final_edges_:
+            nodes.add(edge["source"])
+            nodes.add(edge["target"])
+        for edge in self.pruned_edges_:
+            nodes.add(edge["source"])
+            nodes.add(edge["target"])
+        for key, sepset in self.skeleton_result_.get("sepsets", {}).items():
+            parts = key.split("|")
+            if len(parts) == 2:
+                nodes.update(parts)
+            nodes.update(sepset)
+
         viz_data = {
-            "nodes": list(
-                set([e["source"] for e in self.final_edges_]
-                    + [e["target"] for e in self.final_edges_])
-            ),
+            "nodes": sorted(nodes),
             "edges": [
                 {
                     "source": e["source"],
