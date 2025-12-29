@@ -143,8 +143,21 @@ SCENARIOS = {
 SCENARIO_SETS = {
     "core": ["linear", "nonlinear", "hetero", "measurement"],
     "stress": ["nonlinear", "hetero", "measurement"],
-    "all": ["linear", "nonlinear", "hetero", "measurement"],
+    "all": ["linear", "nonlinear", "hetero", "measurement", "multienv_soft"],
+    "multienv": ["multienv_soft"],
 }
+
+
+def _scenario_multienv_soft(n: int, rng: np.random.Generator, n_vars: int, n_envs: int = 5):
+    base_data, edges = _scenario_linear(n, rng, n_vars)
+    envs = rng.integers(0, n_envs, size=n)
+    data = base_data.copy()
+    for env in range(n_envs):
+        idx = envs == env
+        scale = 1.0 + 0.15 * env
+        data[idx, 0] = data[idx, 0] * scale + rng.normal(scale=0.2, size=idx.sum())
+        data[idx, 1] = data[idx, 1] + 0.2 * env
+    return data, edges, envs
 
 
 def main() -> None:
@@ -170,8 +183,13 @@ def main() -> None:
     results = []
     scenario_names = SCENARIO_SETS[args.scenario_set]
     for name in scenario_names:
-        generator = SCENARIOS[name]
-        data, true_edges = generator(args.n, rng, args.n_vars)
+        if name == "multienv_soft":
+            data, true_edges, envs = _scenario_multienv_soft(args.n, rng, args.n_vars)
+        else:
+            generator = SCENARIOS[name]
+            data, true_edges = generator(args.n, rng, args.n_vars)
+            envs = None
+
         var_names = [f"X{i+1}" for i in range(data.shape[1])]
 
         pacd_config = PACDStructureConfig(
@@ -185,11 +203,19 @@ def main() -> None:
         pacd_score = _score_skeleton(true_edges, pacd_result["skeleton"])
 
         pc_score = None
+        pc_env_score = None
         pc_available = importlib.util.find_spec("causallearn") is not None
         if pc_available:
             pc_result = _maybe_run_pc(data, args.alpha, args.max_k)
             pc_edges = _edges_from_pc(pc_result.G, var_names)
             pc_score = _score_skeleton(true_edges, pc_edges)
+            if envs is not None:
+                env_edges = set()
+                for env in np.unique(envs):
+                    env_data = data[envs == env]
+                    env_result = _maybe_run_pc(env_data, args.alpha, args.max_k)
+                    env_edges.update(_edges_from_pc(env_result.G, var_names))
+                pc_env_score = _score_skeleton(true_edges, list(env_edges))
 
         results.append(
             {
@@ -198,6 +224,7 @@ def main() -> None:
                 "n_vars": args.n_vars,
                 "pacd": pacd_score,
                 "pc": pc_score,
+                "pc_env": pc_env_score,
                 "pc_available": pc_available,
             }
         )
