@@ -234,6 +234,29 @@ def main() -> None:
         )
         with open(output_dir / f"{name}_truth.json", "w", encoding="utf-8") as handle:
             json.dump({"edges": true_edges}, handle, indent=2)
+        truth_graph = {
+            "nodes": var_names,
+            "edges": [
+                {
+                    "source": source,
+                    "target": target,
+                    "weight": 1.0,
+                    "ci": None,
+                    "p_value": None,
+                    "direction_confidence": "truth",
+                    "is_mediated": False,
+                    "sepset": [],
+                    "intervention": {},
+                    "robustness": {},
+                }
+                for source, target in true_edges
+            ],
+            "pruned_edges": [],
+            "sepsets": {},
+            "meta": {"truth": True, "scenario": name},
+        }
+        with open(output_dir / f"{name}_truth_graph.json", "w", encoding="utf-8") as handle:
+            json.dump(truth_graph, handle, indent=2)
 
     with open(output_dir / "summary.json", "w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2)
