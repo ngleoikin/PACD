@@ -883,6 +883,8 @@ class GraphPruner:
             weak_iv = robustness.get("z_strength_to_a", 0.5) < 0.55
             exclusion_leak = robustness.get("exclusion_leak_flag", False)
             direction_confidence = edge.get("direction_confidence", "low")
+            ci_direct = edge.get("ci_direct", [0.0, 0.0])
+            ci_cross_zero = ci_direct[0] <= 0 <= ci_direct[1]
 
             prune_reason = None
 
@@ -894,8 +896,8 @@ class GraphPruner:
                 prune_reason = (
                     f"not_significant (p={p_value:.4f} > {self.config.p_threshold})"
                 )
-            elif weak_iv:
-                prune_reason = "weak_iv (z_auc_to_a < 0.55)"
+            elif weak_iv and (p_value > self.config.p_threshold or ci_cross_zero):
+                prune_reason = "weak_iv (low confidence)"
             elif exclusion_leak:
                 prune_reason = "exclusion_leak"
             elif is_mediated and indirect_ratio > (1 - self.config.indirect_ratio):
@@ -1161,6 +1163,21 @@ class PACDIVAPCIPipeline:
                     self.skeleton_result_["sepsets"].get(f"{target}|{source}", []),
                 ),
             }
+
+            if result["robustness"].get("z_strength_to_a", 0.5) < 0.55:
+                ipw_result = self.effect_estimator.ipw_estimate(
+                    data, source, target, potential_mediators
+                )
+                result.update(
+                    {
+                        "tau_direct": ipw_result["tau"],
+                        "se_direct": ipw_result["se"],
+                        "ci_direct": ipw_result["ci"],
+                        "p_direct": ipw_result["p_value"],
+                        "method": f"{result['method']}+ipw_fallback",
+                        "weak_iv_flag": True,
+                    }
+                )
 
             self.effect_results_.append(result)
 
