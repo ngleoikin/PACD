@@ -175,6 +175,7 @@ def load_ivapci():
         if pkg_name not in sys.modules:
             pkg = types.ModuleType(pkg_name)
             pkg.BaseCausalEstimator = BaseCausalEstimator
+            pkg.__path__ = [str(filepath.parent)]
             sys.modules[pkg_name] = pkg
 
         modified = source.replace(
@@ -202,6 +203,7 @@ class TheoremDiagnosticsConfig: pass
 
         mod = types.ModuleType("ivapci_loaded")
         mod.__file__ = str(filepath)
+        mod.__package__ = pkg_name
         exec(compile(modified, str(filepath), "exec"), mod.__dict__)
         sys.modules["ivapci_loaded"] = mod
 
