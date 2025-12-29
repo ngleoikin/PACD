@@ -20,7 +20,7 @@ import importlib.util
 import numpy as np
 import pandas as pd
 
-from model_wrapper import estimate_ate_ivapci, is_ivapci_available
+from model_wrapper import estimate_ate_ivapci, is_ivapci_available, load_ivapci
 from pacd_structure_learning import PACDStructureConfig, PACDStructureLearner
 
 
@@ -114,7 +114,8 @@ def main() -> None:
         directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
 
     if not is_ivapci_available():
-        raise SystemExit("IVAPCI is not available. Check model_wrapper/load_ivapci.")
+        _, _, err = load_ivapci()
+        raise SystemExit(f"IVAPCI is not available: {err}")
 
     edges_with_effects = []
     for edge in directed_edges:
