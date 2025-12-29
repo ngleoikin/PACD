@@ -859,16 +859,6 @@ class GraphPruner:
         """剪枝"""
         kept = []
         pruned = []
-        tau_values = [
-            abs(edge.get("tau_direct", edge.get("tau_total", 0)))
-            for edge in edges
-        ]
-        if self.config.effect_threshold is None and tau_values:
-            dynamic_threshold = float(
-                np.quantile(tau_values, self.config.effect_threshold_quantile)
-            )
-        else:
-            dynamic_threshold = self.config.effect_threshold or 0.0
 
         for edge in edges:
             source = edge["source"]
@@ -877,6 +867,7 @@ class GraphPruner:
 
             tau = edge.get("tau_direct", edge.get("tau_total", 0))
             p_value = edge.get("p_direct", edge.get("p_total", 1.0))
+            se_value = edge.get("se_direct", edge.get("se_total", 0.0))
             is_mediated = edge.get("is_mediated", False)
             indirect_ratio = edge.get("indirect_ratio", 0)
             robustness = edge.get("robustness", {})
@@ -888,14 +879,14 @@ class GraphPruner:
 
             prune_reason = None
 
-            if abs(tau) < dynamic_threshold:
-                prune_reason = (
-                    f"weak_effect (|τ|={abs(tau):.2f} < {dynamic_threshold:.2f})"
-                )
-            elif p_value > self.config.p_threshold:
+            t_stat = abs(tau) / (se_value + 1e-10)
+
+            if p_value > self.config.p_threshold:
                 prune_reason = (
                     f"not_significant (p={p_value:.4f} > {self.config.p_threshold})"
                 )
+            elif t_stat < 1.96:
+                prune_reason = "weak_effect (|τ|/SE < 1.96)"
             elif weak_iv and (p_value > self.config.p_threshold or ci_cross_zero):
                 prune_reason = "weak_iv (low confidence)"
             elif exclusion_leak:
