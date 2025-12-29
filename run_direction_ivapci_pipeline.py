@@ -46,7 +46,7 @@ def _directed_edges_from_pc(graph, var_names: List[str]) -> List[Dict]:
             elif endpoints == "ARROW-TAIL":
                 source, target = var_names[j], var_names[i]
             else:
-                source, target = var_names[i], var_names[j]
+                continue
             edges.append(
                 {
                     "source": source,
@@ -70,13 +70,18 @@ def _estimate_ivapci_for_edge(
     if "COND" in data.columns:
         env_cols = list(pd.get_dummies(data["COND"], prefix="E", drop_first=True).columns)
 
-    covariates = [c for c in data.columns if c not in [source, target, "COND"]]
+    numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+    covariates = [c for c in numeric_cols if c not in [source, target]]
     X_env = (
         pd.get_dummies(data["COND"], prefix="E", drop_first=True).values.astype(np.float32)
         if env_cols
         else np.zeros((len(data), 0), dtype=np.float32)
     )
-    X_cov = data[covariates].values.astype(np.float32) if covariates else np.zeros((len(data), 1), dtype=np.float32)
+    X_cov = (
+        data[covariates].values.astype(np.float32)
+        if covariates
+        else np.zeros((len(data), 1), dtype=np.float32)
+    )
     X_all = np.concatenate([X_env, X_cov], axis=1) if X_env.size else X_cov
     A = (data[source].values > np.median(data[source].values)).astype(np.float32)
     Y = data[target].values.astype(np.float32)
@@ -146,7 +151,7 @@ def main() -> None:
         source = edge["source"]
         target = edge["target"]
         effect = _estimate_ivapci_for_edge(
-            data, source, target, device=args.device, epochs=args.epochs, n_bootstrap=args.n_bootstrap
+            df, source, target, device=args.device, epochs=args.epochs, n_bootstrap=args.n_bootstrap
         )
         edge_out = {
             **edge,
