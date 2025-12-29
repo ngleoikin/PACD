@@ -123,6 +123,7 @@ def build_report(
         for entry in synthetic_summary:
             pacd = entry.get("pacd", {})
             pc = entry.get("pc", {})
+            pc_env = entry.get("pc_env", {})
             summary_rows.append(
                 {
                     "scenario": entry.get("scenario"),
@@ -130,8 +131,10 @@ def build_report(
                     "pc_available": entry.get("pc_available"),
                     "pacd_f1": pacd.get("f1"),
                     "pc_f1": pc.get("f1") if pc else None,
+                    "pc_env_f1": pc_env.get("f1") if pc_env else None,
                     "pacd_shd": pacd.get("shd"),
                     "pc_shd": pc.get("shd") if pc else None,
+                    "pc_env_shd": pc_env.get("shd") if pc_env else None,
                 }
             )
         summary_df = pd.DataFrame(summary_rows)
