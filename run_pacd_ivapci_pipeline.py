@@ -41,6 +41,7 @@ from scipy import stats
 from scipy.stats import mannwhitneyu, norm, pearsonr, spearmanr
 from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression, Ridge
+import torch
 
 warnings.filterwarnings("ignore")
 
@@ -928,6 +929,16 @@ class PACDIVAPCIPipeline:
         if var_names is None:
             var_names = [c for c in data.columns if c not in ["COND", "INT"]]
 
+        if "COND" in data.columns and not intervention_map:
+            non_baseline = [
+                cond
+                for cond in data["COND"].unique().tolist()
+                if cond not in self.config.baseline_conditions
+            ]
+            intervention_map = {
+                cond: {"targets": var_names} for cond in non_baseline
+            }
+
         print("=" * 70)
         print("PACD-IVAPCI 完整流水线")
         print("=" * 70)
@@ -1323,7 +1334,7 @@ def main() -> None:
         help="效应估计器 (ivapci/pacd/simple)",
     )
     parser.add_argument("--epochs", type=int, default=80, help="训练轮数")
-    parser.add_argument("--device", default="cpu", help="计算设备")
+    parser.add_argument("--device", default="auto", help="计算设备 (auto/cpu/cuda)")
     parser.add_argument("--top-k", type=int, default=30, help="深度学习估计的边数")
 
     parser.add_argument(
@@ -1365,12 +1376,17 @@ def main() -> None:
     baseline_conditions = tuple(
         [c.strip() for c in args.baseline_conds.split(",") if c.strip()]
     )
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+
     config = PipelineConfig(
         alpha_ci=args.alpha,
         max_k=args.max_k,
         estimator=args.estimator,
         ivapci_epochs=args.epochs,
-        ivapci_device=args.device,
+        ivapci_device=device,
         top_k_ivapci=args.top_k,
         effect_threshold=args.effect_threshold,
         effect_threshold_quantile=args.effect_quantile,
