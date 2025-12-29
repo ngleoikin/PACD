@@ -551,6 +551,7 @@ class IVAPCIEffectEstimator:
         mediators: List[str],
         all_vars: List[str],
         use_pacd: bool = False,
+        use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """估计直接效应（控制中介变量后）"""
@@ -620,7 +621,7 @@ class IVAPCIEffectEstimator:
             data_sub, source, target, A, Y, Z_env, covariates
         )
 
-        if self.models.get("estimate_ivapci"):
+        if use_ivapci and self.models.get("estimate_ivapci"):
             try:
                 result = self.models["estimate_ivapci"](
                     V_all,
@@ -656,6 +657,7 @@ class IVAPCIEffectEstimator:
         target: str,
         all_vars: List[str],
         use_pacd: bool = False,
+        use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """估计总效应（不控制中介）"""
@@ -666,6 +668,7 @@ class IVAPCIEffectEstimator:
             [],
             all_vars,
             use_pacd=use_pacd,
+            use_ivapci=use_ivapci,
             candidate_envs_override=candidate_envs_override,
         )
 
@@ -781,6 +784,7 @@ class IVAPCIEffectEstimator:
         potential_mediators: List[str],
         all_vars: List[str],
         use_pacd: bool = False,
+        use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
     ) -> Dict:
         """中介分析"""
@@ -790,6 +794,7 @@ class IVAPCIEffectEstimator:
             target,
             all_vars,
             use_pacd=use_pacd,
+            use_ivapci=use_ivapci,
             candidate_envs_override=candidate_envs_override,
         )
 
@@ -801,6 +806,7 @@ class IVAPCIEffectEstimator:
                 potential_mediators,
                 all_vars,
                 use_pacd=use_pacd,
+                use_ivapci=use_ivapci,
                 candidate_envs_override=candidate_envs_override,
             )
         else:
@@ -1095,6 +1101,7 @@ class PACDIVAPCIPipeline:
 
             use_deep = idx < self.config.top_k_ivapci
             use_pacd = self.config.estimator == "pacd"
+            use_ivapci = use_deep and self.config.estimator == "ivapci"
 
             if use_deep:
                 if self.config.estimator == "pacd":
@@ -1116,6 +1123,7 @@ class PACDIVAPCIPipeline:
                 potential_mediators,
                 var_names,
                 use_pacd=(use_deep and use_pacd),
+                use_ivapci=use_ivapci,
                 candidate_envs_override=candidate_override,
             )
 
