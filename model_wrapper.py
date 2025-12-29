@@ -142,12 +142,11 @@ def load_ivapci():
     _ivapci_initialized = True
 
     try:
-        from models.ivapci_v33_theory import (
-            IVAPCIv33TheoryHierEstimator,
-            IVAPCIV33TheoryConfig,
-        )
-        _ivapci_estimator = IVAPCIv33TheoryHierEstimator
-        _ivapci_config = IVAPCIV33TheoryConfig
+        import importlib
+
+        mod = importlib.import_module("models.ivapci_v33_theory")
+        _ivapci_estimator = mod.IVAPCIv33TheoryHierEstimator
+        _ivapci_config = mod.IVAPCIV33TheoryConfig
         return _ivapci_estimator, _ivapci_config, None
     except Exception as exc:
         _ivapci_error = f"直接import失败: {exc}"
