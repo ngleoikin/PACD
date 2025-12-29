@@ -929,6 +929,16 @@ class PACDIVAPCIPipeline:
         if var_names is None:
             var_names = [c for c in data.columns if c not in ["COND", "INT"]]
 
+        if "COND" in data.columns and not intervention_map:
+            non_baseline = [
+                cond
+                for cond in data["COND"].unique().tolist()
+                if cond not in self.config.baseline_conditions
+            ]
+            intervention_map = {
+                cond: {"targets": var_names} for cond in non_baseline
+            }
+
         print("=" * 70)
         print("PACD-IVAPCI 完整流水线")
         print("=" * 70)
