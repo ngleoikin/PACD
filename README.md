@@ -182,7 +182,7 @@ python run_results_report.py --pacd results/pacd --pc results/pc --synthetic res
 
 ### 定向 + IVAPCI 效应管线
 
-使用 PC 或 PACD 定向，然后用 IVAPCI 估计每条边效应：
+使用 PC / PACD / MPCD / S3C-DO 定向，然后用 IVAPCI 估计每条边效应：
 
 ```bash
 python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/dir_ivapci --direction pacd
@@ -190,11 +190,12 @@ python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/d
 
 常用参数：
 
-- `--direction`：`pc` 或 `pacd`
+- `--direction`：`pc` / `pacd` / `mpcd` / `s3cdo`
 - `--alpha` / `--max-k`：结构学习参数
 - `--epochs`：IVAPCI 训练轮数
 - `--device`：计算设备（`cpu`/`cuda`）
 - `--n-bootstrap`：bootstrap 次数
+- `--s3cdo-top-m`：S3C-DO 筛选阶段每个节点保留的候选邻居数
 - `--baseline-conds`：多环境基线条件（逗号分隔）
 - `--intervention`：干预映射 JSON 文件（可选）
 

@@ -27,6 +27,7 @@ from pacd_structure_learning import (
     PACDStructureConfig,
     PACDStructureLearner,
 )
+from s3cdo_structure_learning import S3CDOConfig, S3CDOStructureLearner
 from run_pacd_ivapci_pipeline import InterventionDirector, PipelineConfig
 
 
@@ -215,9 +216,15 @@ def main() -> None:
     parser.add_argument("--output", "-o", default="./results/dir_ivapci", help="Output directory")
     parser.add_argument(
         "--direction",
-        choices=["pc", "pacd", "mpcd"],
+        choices=["pc", "pacd", "mpcd", "s3cdo"],
         default="pacd",
         help="Direction method",
+    )
+    parser.add_argument(
+        "--s3cdo-top-m",
+        type=int,
+        default=8,
+        help="S3C-DO screening top-m neighbors",
     )
     parser.add_argument(
         "--mpcd-m-grid",
@@ -298,8 +305,18 @@ def main() -> None:
                 intervention_map,
             )
     else:
-        pc_result = _run_pc(data.values, args.alpha, args.max_k)
-        directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
+        if args.direction == "s3cdo":
+            s3_cfg = S3CDOConfig(
+                top_m=args.s3cdo_top_m,
+                alpha=args.alpha,
+                max_k=args.max_k,
+            )
+            s3_learner = S3CDOStructureLearner(s3_cfg)
+            s3_result = s3_learner.learn(data.values, var_names)
+            directed_edges = s3_result["directed_edges"]
+        else:
+            pc_result = _run_pc(data.values, args.alpha, args.max_k)
+            directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
 
     _print_edges(args.direction.upper(), directed_edges)
     total_edges = len(directed_edges)
