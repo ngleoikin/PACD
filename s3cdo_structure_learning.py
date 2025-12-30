@@ -33,6 +33,7 @@ class S3CDOConfig:
     ci_method: str = "spearman"  # spearman / pearson
     use_nonparanormal: bool = False
     ridge_alpha: float = 0.1
+    ci_perm_samples: int = 200
 
     # Orient
     orient_vstructures: bool = True
@@ -98,19 +99,33 @@ class S3CDOStructureLearner:
             return p_value > self.config.alpha, r, p_value
 
         X_S = X[:, S]
-        model_i = Ridge(alpha=self.config.ridge_alpha).fit(X_S, X[:, i])
-        res_i = X[:, i] - model_i.predict(X_S)
-        model_j = Ridge(alpha=self.config.ridge_alpha).fit(X_S, X[:, j])
-        res_j = X[:, j] - model_j.predict(X_S)
+        if self.config.ci_method == "pearson":
+            res_i = X[:, i] - np.dot(X_S, np.linalg.lstsq(X_S, X[:, i], rcond=None)[0])
+            res_j = X[:, j] - np.dot(X_S, np.linalg.lstsq(X_S, X[:, j], rcond=None)[0])
+        else:
+            model_i = Ridge(alpha=self.config.ridge_alpha).fit(X_S, X[:, i])
+            res_i = X[:, i] - model_i.predict(X_S)
+            model_j = Ridge(alpha=self.config.ridge_alpha).fit(X_S, X[:, j])
+            res_j = X[:, j] - model_j.predict(X_S)
 
         if self.config.ci_method == "pearson":
             r, _ = pearsonr(res_i, res_j)
+            z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
+            df = max(n - len(S) - 3, 1)
+            se = 1.0 / np.sqrt(df)
+            p_value = 2 * (1 - norm.cdf(abs(z) / se))
         else:
             r, _ = spearmanr(res_i, res_j)
-        z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
-        df = max(n - len(S) - 3, 1)
-        se = 1.0 / np.sqrt(df)
-        p_value = 2 * (1 - norm.cdf(abs(z) / se))
+            rng = np.random.default_rng(42)
+            perm_stats = []
+            for _ in range(self.config.ci_perm_samples):
+                perm = rng.permutation(res_j)
+                pr, _ = spearmanr(res_i, perm)
+                perm_stats.append(abs(pr))
+            p_value = float(
+                (np.sum(np.array(perm_stats) >= abs(r)) + 1)
+                / (len(perm_stats) + 1)
+            )
         return p_value > self.config.alpha, r, p_value
 
     def _neighbors(self, edges: Set[Tuple[int, int]], node: int, exclude: int) -> Set[int]:
@@ -151,11 +166,16 @@ class S3CDOStructureLearner:
         return False
 
     def _orient_edge(
-        self, src: int, dst: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
+        self,
+        src: int,
+        dst: int,
+        undirected: Set[Tuple[int, int]],
+        directed: Set[Tuple[int, int]],
+        check_cycle: bool = True,
     ) -> bool:
         if (dst, src) in directed:
             return False
-        if self.config.ensure_acyclic and self._would_create_cycle(directed, src, dst):
+        if check_cycle and self.config.ensure_acyclic and self._would_create_cycle(directed, src, dst):
             return False
         u, v = (src, dst) if src < dst else (dst, src)
         undirected.discard((u, v))
@@ -176,8 +196,8 @@ class S3CDOStructureLearner:
                     continue
                 sepset = self.sepsets_.get((i, j)) or self.sepsets_.get((j, i)) or []
                 if k not in sepset:
-                    self._orient_edge(i, k, undirected, directed)
-                    self._orient_edge(j, k, undirected, directed)
+                    self._orient_edge(i, k, undirected, directed, check_cycle=False)
+                    self._orient_edge(j, k, undirected, directed, check_cycle=False)
 
     def _apply_meek_rules(
         self, d: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
@@ -200,20 +220,50 @@ class S3CDOStructureLearner:
                     if c == a:
                         continue
                     if not self._is_adjacent(a, c, undirected, directed):
-                        if self._orient_edge(b, c, undirected, directed):
+                        if self._orient_edge(b, c, undirected, directed, check_cycle=False):
                             changed = True
 
             und_list = list(undirected)
             for (u, v) in und_list:
                 for c in range(d):
                     if (u, c) in directed and (c, v) in directed:
-                        if self._orient_edge(u, v, undirected, directed):
+                        if self._orient_edge(u, v, undirected, directed, check_cycle=False):
                             changed = True
                         break
                     if (v, c) in directed and (c, u) in directed:
-                        if self._orient_edge(v, u, undirected, directed):
+                        if self._orient_edge(v, u, undirected, directed, check_cycle=False):
                             changed = True
                         break
+
+            # R3: a-b, a-c, b->d, c->d, b and c nonadjacent, a-d => a->d
+            und_list = list(undirected)
+            for (a, d_node) in und_list:
+                for b in range(d):
+                    if b == a or not self._is_adjacent(a, b, undirected, directed):
+                        continue
+                    for c in range(d):
+                        if c in (a, b) or not self._is_adjacent(a, c, undirected, directed):
+                            continue
+                        if self._is_adjacent(b, c, undirected, directed):
+                            continue
+                        if (b, d_node) in directed and (c, d_node) in directed:
+                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=False):
+                                changed = True
+                            break
+
+            # R4: a-b, a-c, b->c, b->d, c->d, a-d => a->d
+            und_list = list(undirected)
+            for (a, d_node) in und_list:
+                for b in range(d):
+                    if b == a or not self._is_adjacent(a, b, undirected, directed):
+                        continue
+                    for c in range(d):
+                        if c in (a, b) or not self._is_adjacent(a, c, undirected, directed):
+                            continue
+                        if (b, c) in directed and (b, d_node) in directed and (c, d_node) in directed:
+                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=False):
+                                changed = True
+                            break
 
     def learn(self, X: np.ndarray, var_names: List[str]) -> Dict:
         X = np.asarray(X)
@@ -281,4 +331,3 @@ class S3CDOStructureLearner:
                 for (i, j), S in self.sepsets_.items()
             },
         }
-
