@@ -1,1 +1,188 @@
 # PACD
+
+## 测试与基线
+
+### PACD-IVAPCI 流水线
+
+运行端到端流程：
+
+```bash
+python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
+```
+
+常用参数：
+
+- `--alpha`：CI 显著性水平
+- `--max-k`：最大条件集大小
+- `--estimator`：`ivapci`、`pacd` 或 `simple`
+- `--epochs`：IVAPCI/PACD-T 训练轮数
+- `--n-bootstrap`：IVAPCI bootstrap 次数
+- `--baseline-conds`：干预证据的基线条件（逗号分隔）
+- `--effect-threshold`：固定剪枝阈值（默认使用分位数）
+- `--effect-quantile`：分位数剪枝阈值
+- `--device`：计算设备（`auto`/`cpu`/`cuda`）
+
+#### 激活多环境信号（COND）
+
+当数据包含 `COND` 列时：
+
+- 如果未提供干预映射文件，脚本会自动将 `COND` 中非基线条件视为干预环境；
+- `--baseline-conds` 用于指定哪些条件属于基线（默认 `CD3CD28,CD3CD28+ICAM2`）。
+
+**基线环境解释：**
+`COND` 列中被视为“未干预/对照”的条件集合。它们用于：
+1) 作为干预效应比较的参照分布；
+2) 自动构建干预映射时，排除这些条件（仅将非基线条件视为干预）。
+
+如果你的数据中没有 `CD3CD28` 或 `CD3CD28+ICAM2`，请显式传入你的基线条件，例如：
+
+```bash
+python run_pacd_ivapci_pipeline.py --data your_data.csv --output results/pacd --baseline-conds controlA,controlB
+```
+
+示例：
+
+```bash
+python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd --baseline-conds CD3CD28,CD3CD28+ICAM2
+```
+
+#### 启用 GPU
+
+默认 `--device auto` 会在有 GPU 时使用 `cuda`，否则回退到 `cpu`。
+
+```bash
+python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd --device cuda
+```
+
+### PC 基线
+
+如果已安装 `causal-learn`，运行 PC 基线：
+
+```bash
+python run_pc_baseline.py --data sachs_data.csv --output results/pc --alpha 0.001 --max-k 3
+```
+
+提示：`run_pc_baseline.py` 会自动跳过非数值列（如 `COND`），并将结果写为 PACD 兼容的 JSON 格式（`pc_graph.json`），方便与 PACD 结果一起可视化对比。
+
+PC 基线输出：
+
+- `skeleton.csv`：无向骨架边
+- `cpdag.csv`：CPDAG 中的有向/无向边
+- `pc_graph.json`：用于对比的 JSON 结果
+
+未安装 `causal-learn` 时会提示安装并退出。
+
+### 合成基准（PACD vs PC）
+
+生成合成场景并对比骨架：
+
+```bash
+python run_synthetic_benchmark.py --output results/synthetic --n 1000 --n-vars 12 --alpha 0.001 --max-k 3
+```
+
+输出内容：
+- 每个场景的 CSV 数据
+- 真实边（`*_truth.json`）
+- 汇总指标（`summary.json`）
+
+### MPCD（多尺度渐进因果发现）
+
+MPCD 在多个尺度上运行 PACD 骨架学习，并用稳定性选择过滤边，再做全局一致定向。
+适合需要“跨尺度稳定边 + 风险补完方向”的场景。
+
+示例（使用默认尺度集合）：
+
+```bash
+python - <<'PY'
+import pandas as pd
+from pacd_structure_learning import MPCDConfig, MPCDStructureLearner, PACDStructureConfig
+
+df = pd.read_csv("sachs_data.csv")
+data = df.select_dtypes("number").values
+var_names = list(df.select_dtypes("number").columns)
+
+base_cfg = PACDStructureConfig(alpha=0.001, max_k=3, m=4)
+mpcd_cfg = MPCDConfig(m_grid=[2, 3, 4, 5], stability_tau=0.6, base_config=base_cfg)
+
+learner = MPCDStructureLearner(mpcd_cfg)
+result = learner.learn(data, var_names)
+
+print("稳定骨架边数:", len(result["skeleton"]))
+print("定向边数:", result["n_edges"], "未定向:", result["n_undirected"])
+PY
+```
+
+常用参数说明：
+
+- `MPCDConfig.m_grid`：尺度集合（例如 `[2,3,4,5]`）
+- `MPCDConfig.stability_tau`：稳定性阈值（边在多少比例尺度出现才保留）
+- `MPCDConfig.base_config`：内部 PACD 的配置（如 `alpha`、`max_k`、`ci_method` 等）
+
+输出字段（`result`）：
+
+- `skeleton` / `skeleton_indices`：稳定骨架
+- `directed_edges`：定向与未定向边（`orientation_method` 标记）
+- `edge_persistence`：跨尺度边频率（便于筛选/可视化）
+- `scales` / `stability_tau`：本次 MPCD 的尺度与阈值配置
+
+### 结果报告
+
+生成 PACD/PC/合成基准的 Markdown 报告：
+
+```bash
+python run_results_report.py --pacd results/pacd --pc results/pc --synthetic results/synthetic --output results/report.md
+```
+
+### 定向 + IVAPCI 效应管线
+
+使用 PC 或 PACD 定向，然后用 IVAPCI 估计每条边效应：
+
+```bash
+python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/dir_ivapci --direction pacd
+```
+
+常用参数：
+
+- `--direction`：`pc` 或 `pacd`
+- `--alpha` / `--max-k`：结构学习参数
+- `--epochs`：IVAPCI 训练轮数
+- `--device`：计算设备（`cpu`/`cuda`）
+- `--n-bootstrap`：bootstrap 次数
+- `--baseline-conds`：多环境基线条件（逗号分隔）
+- `--intervention`：干预映射 JSON 文件（可选）
+
+多环境数据（含 `COND`）使用说明：
+
+- 脚本会自动将 `COND` one-hot 作为 **X 块**输入 IVAPCI，以吸收环境漂移；
+- 若 `COND` 为字符串列，依然可直接读取并编码；
+- 建议合成数据的基线环境设置为 `env_0`（例如 `--baseline-conds env_0`）。
+
+当 `--direction pacd` 且数据包含 `COND` 时，脚本会像主流水线一样使用多环境干预证据：
+
+- `--baseline-conds` 指定基线环境（默认 `CD3CD28,CD3CD28+ICAM2`）
+- `--intervention` 指向干预映射 JSON（若不提供，会把非基线环境视为干预）
+
+示例（合成数据）：
+
+```bash
+python run_direction_ivapci_pipeline.py \
+  --data multienv_soft_high.csv \
+  --output results/dir_ivapci \
+  --direction pacd \
+  --baseline-conds env_0
+```
+
+示例（自定义干预映射）：
+
+```bash
+python run_direction_ivapci_pipeline.py \
+  --data sachs_data.csv \
+  --output results/dir_ivapci \
+  --direction pacd \
+  --baseline-conds CD3CD28,CD3CD28+ICAM2 \
+  --intervention sachs_intervention_map.json
+```
+
+输出：
+- `edge_effects.csv`
+- `edge_effects.json`
