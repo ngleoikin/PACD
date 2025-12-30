@@ -196,6 +196,8 @@ python run_direction_ivapci_pipeline.py \
   --output results/dir_ivapci \
   --direction s3cdo \
   --s3cdo-top-m 8 \
+  --s3cdo-ci-method spearman \
+  --s3cdo-ci-perm-samples 200 \
   --n-bootstrap 2
 ```
 
@@ -207,6 +209,9 @@ python run_direction_ivapci_pipeline.py \
 - `--device`：计算设备（`cpu`/`cuda`）
 - `--n-bootstrap`：bootstrap 次数
 - `--s3cdo-top-m`：S3C-DO 筛选阶段每个节点保留的候选邻居数
+- `--s3cdo-ci-method`：S3C-DO CI 检验方法（`spearman` / `pearson`）
+- `--s3cdo-use-nonparanormal`：启用 nonparanormal 变换
+- `--s3cdo-ci-perm-samples`：Spearman 置换检验次数
 - `--baseline-conds`：多环境基线条件（逗号分隔）
 - `--intervention`：干预映射 JSON 文件（可选）
 

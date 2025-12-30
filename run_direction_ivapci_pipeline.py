@@ -227,6 +227,23 @@ def main() -> None:
         help="S3C-DO screening top-m neighbors",
     )
     parser.add_argument(
+        "--s3cdo-ci-method",
+        choices=["spearman", "pearson"],
+        default="spearman",
+        help="S3C-DO CI method (spearman/pearson)",
+    )
+    parser.add_argument(
+        "--s3cdo-use-nonparanormal",
+        action="store_true",
+        help="Enable nonparanormal transform for S3C-DO",
+    )
+    parser.add_argument(
+        "--s3cdo-ci-perm-samples",
+        type=int,
+        default=200,
+        help="S3C-DO permutation samples for Spearman CI",
+    )
+    parser.add_argument(
         "--mpcd-m-grid",
         default="",
         help="MPCD scales, comma-separated (e.g. 2,3,4,5)",
@@ -310,6 +327,9 @@ def main() -> None:
                 top_m=args.s3cdo_top_m,
                 alpha=args.alpha,
                 max_k=args.max_k,
+                ci_method=args.s3cdo_ci_method,
+                use_nonparanormal=args.s3cdo_use_nonparanormal,
+                ci_perm_samples=args.s3cdo_ci_perm_samples,
             )
             s3_learner = S3CDOStructureLearner(s3_cfg)
             s3_result = s3_learner.learn(data.values, var_names)
