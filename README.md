@@ -140,6 +140,38 @@ PY
 - `edge_persistence`：跨尺度边频率（便于筛选/可视化）
 - `scales` / `stability_tau`：本次 MPCD 的尺度与阈值配置
 
+### S3C-DO（筛选-清洗-定向）
+
+S3C-DO 是 “筛选 → 清洗（局部 PC-stable）→ 定向（v-structure + Meek）” 的三段式框架。
+适合高维场景下先缩小候选邻域，再做局部化 CI 检验。
+
+示例：
+
+```bash
+python - <<'PY'
+import pandas as pd
+from s3cdo_structure_learning import S3CDOConfig, S3CDOStructureLearner
+
+df = pd.read_csv("sachs_data.csv")
+X = df.select_dtypes("number").values
+var_names = list(df.select_dtypes("number").columns)
+
+cfg = S3CDOConfig(top_m=8, max_k=3, alpha=0.001, ci_method="spearman")
+learner = S3CDOStructureLearner(cfg)
+result = learner.learn(X, var_names)
+
+print("候选边数:", len(result["candidate_edges"]))
+print("骨架边数:", len(result["skeleton"]))
+PY
+```
+
+常用参数：
+
+- `top_m`：筛选阶段每个节点保留的候选邻居数
+- `max_k`：清洗阶段最大条件集大小
+- `ci_method`：`spearman` / `pearson`
+- `use_nonparanormal`：是否做 copula 变换（增强线性化）
+
 ### 结果报告
 
 生成 PACD/PC/合成基准的 Markdown 报告：
