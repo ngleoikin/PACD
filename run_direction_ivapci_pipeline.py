@@ -21,7 +21,12 @@ import numpy as np
 import pandas as pd
 
 from model_wrapper import estimate_ate_ivapci, is_ivapci_available, load_ivapci
-from pacd_structure_learning import PACDStructureConfig, PACDStructureLearner
+from pacd_structure_learning import (
+    MPCDConfig,
+    MPCDStructureLearner,
+    PACDStructureConfig,
+    PACDStructureLearner,
+)
 from run_pacd_ivapci_pipeline import InterventionDirector, PipelineConfig
 
 
@@ -208,7 +213,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Direction + IVAPCI pipeline")
     parser.add_argument("--data", "-d", required=True, help="Input CSV file")
     parser.add_argument("--output", "-o", default="./results/dir_ivapci", help="Output directory")
-    parser.add_argument("--direction", choices=["pc", "pacd"], default="pacd", help="Direction method")
+    parser.add_argument(
+        "--direction",
+        choices=["pc", "pacd", "mpcd"],
+        default="pacd",
+        help="Direction method",
+    )
+    parser.add_argument(
+        "--mpcd-m-grid",
+        default="",
+        help="MPCD scales, comma-separated (e.g. 2,3,4,5)",
+    )
+    parser.add_argument(
+        "--mpcd-stability-tau",
+        type=float,
+        default=0.6,
+        help="MPCD stability threshold",
+    )
     parser.add_argument("--alpha", type=float, default=0.001, help="CI significance level")
     parser.add_argument("--max-k", type=int, default=3, help="Maximum conditioning set size")
     parser.add_argument("--epochs", type=int, default=80, help="IVAPCI training epochs")
@@ -234,9 +255,22 @@ def main() -> None:
     var_names = list(numeric_df.columns)
     data = numeric_df
 
-    if args.direction == "pacd":
+    if args.direction in {"pacd", "mpcd"}:
         config = PACDStructureConfig(alpha=args.alpha, max_k=args.max_k)
-        learner = PACDStructureLearner(config)
+        if args.direction == "mpcd":
+            m_grid = [
+                int(item.strip())
+                for item in args.mpcd_m_grid.split(",")
+                if item.strip()
+            ]
+            mpcd_config = MPCDConfig(
+                m_grid=m_grid or None,
+                stability_tau=args.mpcd_stability_tau,
+                base_config=config,
+            )
+            learner = MPCDStructureLearner(mpcd_config)
+        else:
+            learner = PACDStructureLearner(config)
         result = learner.learn(data.values, var_names)
         directed_edges = result["directed_edges"]
         if "COND" in df.columns:
