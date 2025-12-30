@@ -85,6 +85,46 @@ python run_synthetic_benchmark.py --output results/synthetic --n 1000 --n-vars 1
 - 真实边（`*_truth.json`）
 - 汇总指标（`summary.json`）
 
+### MPCD（多尺度渐进因果发现）
+
+MPCD 在多个尺度上运行 PACD 骨架学习，并用稳定性选择过滤边，再做全局一致定向。
+适合需要“跨尺度稳定边 + 风险补完方向”的场景。
+
+示例（使用默认尺度集合）：
+
+```bash
+python - <<'PY'
+import pandas as pd
+from pacd_structure_learning import MPCDConfig, MPCDStructureLearner, PACDStructureConfig
+
+df = pd.read_csv("sachs_data.csv")
+data = df.select_dtypes("number").values
+var_names = list(df.select_dtypes("number").columns)
+
+base_cfg = PACDStructureConfig(alpha=0.001, max_k=3, m=4)
+mpcd_cfg = MPCDConfig(m_grid=[2, 3, 4, 5], stability_tau=0.6, base_config=base_cfg)
+
+learner = MPCDStructureLearner(mpcd_cfg)
+result = learner.learn(data, var_names)
+
+print("稳定骨架边数:", len(result["skeleton"]))
+print("定向边数:", result["n_edges"], "未定向:", result["n_undirected"])
+PY
+```
+
+常用参数说明：
+
+- `MPCDConfig.m_grid`：尺度集合（例如 `[2,3,4,5]`）
+- `MPCDConfig.stability_tau`：稳定性阈值（边在多少比例尺度出现才保留）
+- `MPCDConfig.base_config`：内部 PACD 的配置（如 `alpha`、`max_k`、`ci_method` 等）
+
+输出字段（`result`）：
+
+- `skeleton` / `skeleton_indices`：稳定骨架
+- `directed_edges`：定向与未定向边（`orientation_method` 标记）
+- `edge_persistence`：跨尺度边频率（便于筛选/可视化）
+- `scales` / `stability_tau`：本次 MPCD 的尺度与阈值配置
+
 ### 结果报告
 
 生成 PACD/PC/合成基准的 Markdown 报告：
