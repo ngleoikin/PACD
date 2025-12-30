@@ -12,7 +12,7 @@ PACD 结构学习模块
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -827,6 +827,133 @@ class PACDEnsembleStructureLearner(PACDStructureLearner):
                 e["residual_dep_xy"] = None
                 e["residual_dep_yx"] = None
         return edges
+
+
+@dataclass
+class MPCDConfig:
+    """MPCD 多尺度渐进结构学习配置"""
+
+    # 多尺度设置
+    m_grid: Optional[List[int]] = None
+    stability_tau: float = 0.6
+
+    # 复用 PACD 配置
+    base_config: PACDStructureConfig = field(default_factory=PACDStructureConfig)
+
+
+class MPCDStructureLearner(PACDStructureLearner):
+    """
+    MPCD：多尺度渐进因果发现
+
+    流程:
+    1) 在每个尺度 m 上运行 PACD 骨架学习，得到 {G_m}
+    2) 计算边持久性 π(e)，筛选稳定边集
+    3) 在稳定骨架上计算 sepset
+    4) 使用 v-structure + Meek + 风险补完进行全局一致定向
+    """
+
+    def __init__(self, config: Optional[MPCDConfig] = None):
+        if config is None:
+            config = MPCDConfig()
+        self.mpcd_config = config
+        base_cfg = config.base_config
+        super().__init__(base_cfg)
+
+    def _iter_scales(self) -> List[int]:
+        if self.mpcd_config.m_grid:
+            return list(self.mpcd_config.m_grid)
+        m0 = int(self.config.m)
+        return sorted({max(1, m0 - 1), m0, m0 + 1})
+
+    def _compute_sepsets_for_graph(self, X: np.ndarray, edges: Set[Tuple[int, int]]) -> None:
+        n, d = X.shape
+        self.sepsets_.clear()
+        self.edge_pvalues_sep_.clear()
+        if getattr(self.config, "cache_padic_features", True):
+            try:
+                self.ci_tester.mapper.fit(X)
+                phi_all = self.ci_tester.mapper.transform(X)
+            except Exception:
+                phi_all = None
+            self.ci_tester.set_cache(phi_all)
+        else:
+            self.ci_tester.set_cache(None)
+
+        for k in range(self.config.max_k + 1):
+            for i in range(d):
+                for j in range(i + 1, d):
+                    if (i, j) in edges or (i, j) in self.sepsets_:
+                        continue
+                    neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
+                    if len(neighbors) < k:
+                        continue
+                    for S in combinations(neighbors, k):
+                        is_indep, _, p = self.ci_tester.test_partial_correlation(X, i, j, list(S))
+                        if is_indep:
+                            self.sepsets_[(i, j)] = list(S)
+                            self.sepsets_[(j, i)] = list(S)
+                            self.edge_pvalues_sep_[(i, j)] = float(p)
+                            self.edge_pvalues_sep_[(j, i)] = float(p)
+                            break
+
+        self.ci_tester.set_cache(None)
+
+    def learn(self, X: np.ndarray, var_names: List[str]) -> Dict:
+        scales = self._iter_scales()
+        edge_counts: Dict[Tuple[int, int], int] = {}
+        total_scales = len(scales)
+
+        for m in scales:
+            cfg = replace(self.config, m=int(m))
+            learner = PACDStructureLearner(cfg)
+            edges = learner.learn_skeleton(X)
+            for (i, j) in edges:
+                key = (i, j)
+                edge_counts[key] = edge_counts.get(key, 0) + 1
+
+        stable_edges = {
+            (i, j)
+            for (i, j), count in edge_counts.items()
+            if count / max(1, total_scales) >= self.mpcd_config.stability_tau
+        }
+
+        self.skeleton_ = stable_edges
+        self._compute_sepsets_for_graph(X, stable_edges)
+
+        directed_edges = self._orient_edges_global(
+            X, var_names, residual_weight=self.config.residual_dependence_weight
+        )
+
+        sepsets_named = {
+            f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
+            for (i, j), S in self.sepsets_.items()
+        }
+        edge_persistence = [
+            {
+                "node1": var_names[i],
+                "node2": var_names[j],
+                "freq": count / max(1, total_scales),
+            }
+            for (i, j), count in edge_counts.items()
+        ]
+        edge_persistence.sort(key=lambda e: (-e["freq"], e["node1"], e["node2"]))
+
+        directed_count = sum(
+            1 for edge in directed_edges if edge.get("orientation_method") != "undirected"
+        )
+        undirected_count = len(directed_edges) - directed_count
+
+        return {
+            "skeleton": [(var_names[i], var_names[j]) for (i, j) in stable_edges],
+            "skeleton_indices": list(stable_edges),
+            "directed_edges": directed_edges,
+            "sepsets": sepsets_named,
+            "n_edges": directed_count,
+            "n_undirected": undirected_count,
+            "edge_persistence": edge_persistence,
+            "scales": scales,
+            "stability_tau": float(self.mpcd_config.stability_tau),
+        }
 
 
 def demo() -> None:
