@@ -91,6 +91,11 @@ class PipelineConfig:
     # 输出
     top_k_ivapci: int = 30
 
+    # Step 1: 结构学习方法
+    direction_method: str = "pacd"  # pacd / mpcd
+    mpcd_m_grid: Optional[List[int]] = None
+    mpcd_stability_tau: float = 0.6
+
 
 # ============================================================
 # 模型导入
@@ -129,12 +134,14 @@ def import_pacd_structure():
     """导入PACD结构学习模块"""
     try:
         from pacd_structure_learning import (
+            MPCDConfig,
+            MPCDStructureLearner,
             PACDStructureLearner,
             PACDStructureConfig,
         )
-        return PACDStructureLearner, PACDStructureConfig, True
+        return (MPCDStructureLearner, MPCDConfig, PACDStructureLearner, PACDStructureConfig, True)
     except ImportError:
-        return None, None, False
+        return None, None, None, None, False
 
 
 class PACDSkeletonLearner:
@@ -151,7 +158,13 @@ class PACDSkeletonLearner:
         self.sepsets_: Dict[Tuple[int, int], List[int]] = {}
         self.edge_pvalues_: Dict[Tuple[int, int], float] = {}
 
-        self._PACDLearner, self._PACDConfig, self._use_pacd = import_pacd_structure()
+        (
+            self._MPCDLearner,
+            self._MPCDConfig,
+            self._PACDLearner,
+            self._PACDConfig,
+            self._use_pacd,
+        ) = import_pacd_structure()
 
     def nonparanormal_transform(self, X: np.ndarray) -> np.ndarray:
         """Gaussian Copula变换 (回退用)"""
@@ -204,16 +217,33 @@ class PACDSkeletonLearner:
         优先使用 p-adic PACD，否则回退到简化版
         """
         if self._use_pacd:
-            print("  使用 p-adic PACD 结构学习")
-            pacd_config = self._PACDConfig(
-                p=2,
-                m=4,
-                alpha=self.config.alpha_ci,
-                max_k=self.config.max_k,
-                ci_method="pearson" if self.config.use_nonparanormal else "spearman",
-                use_nonparanormal=self.config.use_nonparanormal,
-            )
-            learner = self._PACDLearner(pacd_config)
+            if self.config.direction_method == "mpcd":
+                print("  使用 MPCD 多尺度结构学习")
+                base_cfg = self._PACDConfig(
+                    p=2,
+                    m=4,
+                    alpha=self.config.alpha_ci,
+                    max_k=self.config.max_k,
+                    ci_method="pearson" if self.config.use_nonparanormal else "spearman",
+                    use_nonparanormal=self.config.use_nonparanormal,
+                )
+                mpcd_cfg = self._MPCDConfig(
+                    m_grid=self.config.mpcd_m_grid,
+                    stability_tau=self.config.mpcd_stability_tau,
+                    base_config=base_cfg,
+                )
+                learner = self._MPCDLearner(mpcd_cfg)
+            else:
+                print("  使用 p-adic PACD 结构学习")
+                pacd_config = self._PACDConfig(
+                    p=2,
+                    m=4,
+                    alpha=self.config.alpha_ci,
+                    max_k=self.config.max_k,
+                    ci_method="pearson" if self.config.use_nonparanormal else "spearman",
+                    use_nonparanormal=self.config.use_nonparanormal,
+                )
+                learner = self._PACDLearner(pacd_config)
             result = learner.learn(X, var_names)
 
             self.sepsets_ = {}
@@ -1414,6 +1444,23 @@ def main() -> None:
     parser.add_argument("--max-k", type=int, default=3, help="最大条件集大小")
 
     parser.add_argument(
+        "--direction",
+        choices=["pacd", "mpcd"],
+        default="pacd",
+        help="结构学习方向方法 (pacd/mpcd)",
+    )
+    parser.add_argument(
+        "--mpcd-m-grid",
+        default="",
+        help="MPCD 尺度集合（逗号分隔，如 2,3,4,5）",
+    )
+    parser.add_argument(
+        "--mpcd-stability-tau",
+        type=float,
+        default=0.6,
+        help="MPCD 稳定性阈值",
+    )
+    parser.add_argument(
         "--estimator",
         choices=["ivapci", "pacd", "simple"],
         default="ivapci",
@@ -1482,6 +1529,13 @@ def main() -> None:
         effect_threshold_quantile=args.effect_quantile,
         p_threshold=args.p_threshold,
         baseline_conditions=baseline_conditions,
+        direction_method=args.direction,
+        mpcd_m_grid=[
+            int(item.strip())
+            for item in args.mpcd_m_grid.split(",")
+            if item.strip()
+        ] or None,
+        mpcd_stability_tau=args.mpcd_stability_tau,
     )
 
     pipeline = PACDIVAPCIPipeline(config)

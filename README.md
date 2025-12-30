@@ -14,6 +14,9 @@ python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
 
 - `--alpha`：CI 显著性水平
 - `--max-k`：最大条件集大小
+- `--direction`：结构学习方向方法（`pacd` / `mpcd`）
+- `--mpcd-m-grid`：MPCD 尺度集合（逗号分隔）
+- `--mpcd-stability-tau`：MPCD 稳定性阈值
 - `--estimator`：`ivapci`、`pacd` 或 `simple`
 - `--epochs`：IVAPCI/PACD-T 训练轮数
 - `--n-bootstrap`：IVAPCI bootstrap 次数
@@ -44,6 +47,18 @@ python run_pacd_ivapci_pipeline.py --data your_data.csv --output results/pacd --
 
 ```bash
 python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd --baseline-conds CD3CD28,CD3CD28+ICAM2
+```
+
+MPCD 结构学习示例（多尺度）：
+
+```bash
+python run_pacd_ivapci_pipeline.py \
+  --data multienv_soft_low.csv \
+  --output results/mpcd \
+  --direction mpcd \
+  --mpcd-m-grid 2,3,4,5 \
+  --mpcd-stability-tau 0.6 \
+  --baseline-conds env_0
 ```
 
 #### 启用 GPU
