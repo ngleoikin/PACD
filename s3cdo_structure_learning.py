@@ -93,6 +93,17 @@ class S3CDOStructureLearner:
                 r, _ = pearsonr(X[:, i], X[:, j])
             else:
                 r, _ = spearmanr(X[:, i], X[:, j])
+                rng = np.random.default_rng(42)
+                perm_stats = []
+                for _ in range(self.config.ci_perm_samples):
+                    perm = rng.permutation(X[:, j])
+                    pr, _ = spearmanr(X[:, i], perm)
+                    perm_stats.append(abs(pr))
+                p_value = float(
+                    (np.sum(np.array(perm_stats) >= abs(r)) + 1)
+                    / (len(perm_stats) + 1)
+                )
+                return p_value > self.config.alpha, r, p_value
             z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
             se = 1.0 / np.sqrt(n - 3)
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
@@ -146,6 +157,30 @@ class S3CDOStructureLearner:
         if (u, v) in undirected:
             return True
         return (a, b) in directed or (b, a) in directed
+
+    def _is_undirected(self, a: int, b: int, undirected: Set[Tuple[int, int]]) -> bool:
+        if a == b:
+            return False
+        u, v = (a, b) if a < b else (b, a)
+        return (u, v) in undirected
+
+    def _has_directed_path(self, src: int, dst: int, directed: Set[Tuple[int, int]]) -> bool:
+        stack = [src]
+        visited = set()
+        adj: Dict[int, Set[int]] = {}
+        for a, b in directed:
+            adj.setdefault(a, set()).add(b)
+        while stack:
+            cur = stack.pop()
+            if cur == dst:
+                return True
+            if cur in visited:
+                continue
+            visited.add(cur)
+            for nxt in adj.get(cur, ()):
+                if nxt not in visited:
+                    stack.append(nxt)
+        return False
 
     def _would_create_cycle(self, directed: Set[Tuple[int, int]], src: int, dst: int) -> bool:
         stack = [dst]
@@ -225,24 +260,21 @@ class S3CDOStructureLearner:
 
             und_list = list(undirected)
             for (u, v) in und_list:
-                for c in range(d):
-                    if (u, c) in directed and (c, v) in directed:
-                        if self._orient_edge(u, v, undirected, directed, check_cycle=False):
-                            changed = True
-                        break
-                    if (v, c) in directed and (c, u) in directed:
-                        if self._orient_edge(v, u, undirected, directed, check_cycle=False):
-                            changed = True
-                        break
+                if self._has_directed_path(u, v, directed):
+                    if self._orient_edge(u, v, undirected, directed, check_cycle=False):
+                        changed = True
+                elif self._has_directed_path(v, u, directed):
+                    if self._orient_edge(v, u, undirected, directed, check_cycle=False):
+                        changed = True
 
-            # R3: a-b, a-c, b->d, c->d, b and c nonadjacent, a-d => a->d
+            # R3: a-b, a-c 均无向, b->d, c->d, b and c nonadjacent, a-d => a->d
             und_list = list(undirected)
             for (a, d_node) in und_list:
                 for b in range(d):
-                    if b == a or not self._is_adjacent(a, b, undirected, directed):
+                    if b == a or not self._is_undirected(a, b, undirected):
                         continue
                     for c in range(d):
-                        if c in (a, b) or not self._is_adjacent(a, c, undirected, directed):
+                        if c in (a, b) or not self._is_undirected(a, c, undirected):
                             continue
                         if self._is_adjacent(b, c, undirected, directed):
                             continue
@@ -251,14 +283,14 @@ class S3CDOStructureLearner:
                                 changed = True
                             break
 
-            # R4: a-b, a-c, b->c, b->d, c->d, a-d => a->d
+            # R4: a-b, a-c 均无向, b->c, b->d, c->d, a-d => a->d
             und_list = list(undirected)
             for (a, d_node) in und_list:
                 for b in range(d):
-                    if b == a or not self._is_adjacent(a, b, undirected, directed):
+                    if b == a or not self._is_undirected(a, b, undirected):
                         continue
                     for c in range(d):
-                        if c in (a, b) or not self._is_adjacent(a, c, undirected, directed):
+                        if c in (a, b) or not self._is_undirected(a, c, undirected):
                             continue
                         if (b, c) in directed and (b, d_node) in directed and (c, d_node) in directed:
                             if self._orient_edge(a, d_node, undirected, directed, check_cycle=False):
@@ -276,7 +308,7 @@ class S3CDOStructureLearner:
         for k in range(self.config.max_k + 1):
             to_remove = []
             for (i, j) in list(edges):
-                neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
+                neighbors = self._neighbors(edges, i, j)
                 if len(neighbors) < k:
                     continue
                 for S in combinations(neighbors, k):
