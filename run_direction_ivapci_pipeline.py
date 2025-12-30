@@ -147,6 +147,7 @@ def _estimate_ivapci_for_edge(
     device: str,
     epochs: int,
     n_bootstrap: int,
+    progress: Optional[Dict[str, int]] = None,
 ) -> Dict:
     env_cols = []
     if "COND" in data.columns:
@@ -198,6 +199,7 @@ def _estimate_ivapci_for_edge(
         epochs=epochs,
         device=device,
         n_bootstrap=n_bootstrap,
+        progress=progress,
     )
     return result
 
@@ -278,12 +280,23 @@ def main() -> None:
         raise SystemExit(f"IVAPCI is not available: {err}")
 
     edges_with_effects = []
-    for edge in directed_edges:
+    for idx, edge in enumerate(directed_edges, start=1):
         source = edge["source"]
         target = edge["target"]
         print(f"[IVAPCI] {source} -> {target} ...")
         effect = _estimate_ivapci_for_edge(
-            df, source, target, device=args.device, epochs=args.epochs, n_bootstrap=args.n_bootstrap
+            df,
+            source,
+            target,
+            device=args.device,
+            epochs=args.epochs,
+            n_bootstrap=args.n_bootstrap,
+            progress={
+                "edge_index": idx,
+                "edge_total": total_edges,
+                "base_scenario": (idx - 1) * (1 + max(args.n_bootstrap, 0)) + 1,
+                "total_scenarios": total_trains,
+            },
         )
         edge_out = {
             **edge,

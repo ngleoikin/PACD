@@ -381,6 +381,7 @@ def estimate_ate_ivapci(
     epochs: int = 80,
     device: str = "cpu",
     n_bootstrap: int = 100,
+    progress: Optional[Dict[str, int]] = None,
 ) -> Dict:
     """使用IVAPCI估计ATE"""
     from scipy.stats import norm
@@ -390,13 +391,31 @@ def estimate_ate_ivapci(
     A = np.asarray(A, dtype=np.float32)
     Y = np.asarray(Y, dtype=np.float32)
 
+    if progress:
+        scenario = progress.get("base_scenario", 1)
+        total = progress.get("total_scenarios", 1)
+        edge_index = progress.get("edge_index", 1)
+        edge_total = progress.get("edge_total", 1)
+        print(
+            f"[IVAPCI] scenario {scenario}/{total} "
+            f"(edge {edge_index}/{edge_total}, main)"
+        )
     estimator = create_ivapci_estimator(x_dim, w_dim, z_dim, n, epochs, device)
     estimator.fit(V_all, A, Y)
     ate = estimator.estimate_ate(V_all, A, Y)
     diagnostics = getattr(estimator, "training_diagnostics", {})
 
     ates = []
-    for _ in range(n_bootstrap):
+    for b in range(n_bootstrap):
+        if progress:
+            scenario = progress.get("base_scenario", 1) + b + 1
+            total = progress.get("total_scenarios", 1)
+            edge_index = progress.get("edge_index", 1)
+            edge_total = progress.get("edge_total", 1)
+            print(
+                f"[IVAPCI] scenario {scenario}/{total} "
+                f"(edge {edge_index}/{edge_total}, bootstrap {b + 1}/{n_bootstrap})"
+            )
         idx = np.random.choice(n, n, replace=True)
         try:
             est_b = create_ivapci_estimator(
