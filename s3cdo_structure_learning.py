@@ -34,6 +34,8 @@ class S3CDOConfig:
     use_nonparanormal: bool = False
     ridge_alpha: float = 0.1
     ci_perm_samples: int = 200
+    collider_rule: str = "cpc"  # naive / cpc / majority
+    collider_majority_threshold: float = 0.5
 
     # Orient
     orient_vstructures: bool = True
@@ -48,6 +50,7 @@ class S3CDOStructureLearner:
         self.config = config or S3CDOConfig()
         self.skeleton_: Set[Tuple[int, int]] = set()
         self.sepsets_: Dict[Tuple[int, int], List[int]] = {}
+        self.sepsets_all_: Dict[Tuple[int, int], List[List[int]]] = {}
         self.edge_scores_: Dict[Tuple[int, int], float] = {}
 
     def _nonparanormal_transform(self, X: np.ndarray) -> np.ndarray:
@@ -148,6 +151,25 @@ class S3CDOStructureLearner:
                 neighbors.add(a)
         return neighbors
 
+    def _collect_sepsets(
+        self, X: np.ndarray, i: int, j: int, neighbors: Set[int]
+    ) -> List[List[int]]:
+        sepsets: List[List[int]] = []
+        for k in range(self.config.max_k + 1):
+            if len(neighbors) < k:
+                continue
+            for S in combinations(neighbors, k):
+                is_indep, _, _ = self._partial_corr_test(X, i, j, list(S))
+                if is_indep:
+                    sepsets.append(list(S))
+        return sepsets
+
+    def _get_sepsets(self, X: np.ndarray, i: int, j: int, neighbors: Set[int]) -> List[List[int]]:
+        key = (i, j) if i < j else (j, i)
+        if key not in self.sepsets_all_:
+            self.sepsets_all_[key] = self._collect_sepsets(X, i, j, neighbors)
+        return self.sepsets_all_[key]
+
     def _is_adjacent(
         self, a: int, b: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
     ) -> bool:
@@ -220,7 +242,11 @@ class S3CDOStructureLearner:
         return False
 
     def _orient_vstructures(
-        self, d: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
+        self,
+        X: np.ndarray,
+        d: int,
+        undirected: Set[Tuple[int, int]],
+        directed: Set[Tuple[int, int]],
     ) -> None:
         if not self.config.orient_vstructures:
             return
@@ -229,8 +255,19 @@ class S3CDOStructureLearner:
             for i, j in combinations(nbrs, 2):
                 if self._is_adjacent(i, j, undirected, directed):
                     continue
-                sepset = self.sepsets_.get((i, j)) or self.sepsets_.get((j, i)) or []
-                if k not in sepset:
+                neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
+                sepsets = self._get_sepsets(X, i, j, neighbors)
+                if not sepsets:
+                    continue
+                contains = [k in s for s in sepsets]
+                frac = sum(contains) / len(contains)
+                if self.config.collider_rule == "naive":
+                    should_orient = k not in sepsets[0]
+                elif self.config.collider_rule == "majority":
+                    should_orient = frac < self.config.collider_majority_threshold
+                else:
+                    should_orient = not any(contains) and all(not c for c in contains)
+                if should_orient:
                     self._orient_edge(i, k, undirected, directed, check_cycle=False)
                     self._orient_edge(j, k, undirected, directed, check_cycle=False)
 
@@ -309,7 +346,7 @@ class S3CDOStructureLearner:
         for k in range(self.config.max_k + 1):
             to_remove = []
             for (i, j) in list(edges):
-                neighbors = self._neighbors(edges, i, j)
+                neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
                 if len(neighbors) < k:
                     continue
                 for S in combinations(neighbors, k):
@@ -328,7 +365,7 @@ class S3CDOStructureLearner:
         undirected = {tuple(sorted(e)) for e in edges}
         directed: Set[Tuple[int, int]] = set()
 
-        self._orient_vstructures(X.shape[1], undirected, directed)
+        self._orient_vstructures(X, X.shape[1], undirected, directed)
         self._apply_meek_rules(X.shape[1], undirected, directed)
         print(f"[S3CDO] directed edges: {len(directed)} undirected: {len(undirected)}")
 
