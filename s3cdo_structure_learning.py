@@ -303,6 +303,7 @@ class S3CDOStructureLearner:
             X = self._nonparanormal_transform(X)
 
         candidate_edges = self._screen(X)
+        print(f"[S3CDO] screen edges: {len(candidate_edges)}")
         edges = set(candidate_edges)
 
         for k in range(self.config.max_k + 1):
@@ -320,13 +321,16 @@ class S3CDOStructureLearner:
                         break
             for e in to_remove:
                 edges.discard(e)
+            print(f"[S3CDO] clean k={k} edges: {len(edges)}")
 
         self.skeleton_ = edges
+        print(f"[S3CDO] skeleton edges: {len(self.skeleton_)}")
         undirected = {tuple(sorted(e)) for e in edges}
         directed: Set[Tuple[int, int]] = set()
 
         self._orient_vstructures(X.shape[1], undirected, directed)
         self._apply_meek_rules(X.shape[1], undirected, directed)
+        print(f"[S3CDO] directed edges: {len(directed)} undirected: {len(undirected)}")
 
         directed_edges: List[Dict] = []
         for (src, dst) in sorted(directed):
