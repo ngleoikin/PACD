@@ -188,6 +188,17 @@ python run_results_report.py --pacd results/pacd --pc results/pc --synthetic res
 python run_direction_ivapci_pipeline.py --data sachs_data.csv --output results/dir_ivapci --direction pacd
 ```
 
+S3C-DO 示例：
+
+```bash
+python run_direction_ivapci_pipeline.py \
+  --data multienv_soft_low.csv \
+  --output results/dir_ivapci \
+  --direction s3cdo \
+  --s3cdo-top-m 8 \
+  --n-bootstrap 2
+```
+
 常用参数：
 
 - `--direction`：`pc` / `pacd` / `mpcd` / `s3cdo`
