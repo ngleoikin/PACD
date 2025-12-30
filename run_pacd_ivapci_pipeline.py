@@ -564,6 +564,8 @@ class IVAPCIEffectEstimator:
         use_pacd: bool = False,
         use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
+        progress_state: Optional[Dict[str, int]] = None,
+        total_calls: int = 0,
     ) -> Dict:
         """估计直接效应（控制中介变量后）"""
         baseline_conditions = list(self.config.baseline_conditions)
@@ -634,6 +636,10 @@ class IVAPCIEffectEstimator:
 
         if use_ivapci and self.models.get("estimate_ivapci"):
             try:
+                call_index = 0
+                if progress_state is not None:
+                    progress_state["call_index"] += 1
+                    call_index = progress_state["call_index"]
                 result = self.models["estimate_ivapci"](
                     V_all,
                     A,
@@ -644,6 +650,16 @@ class IVAPCIEffectEstimator:
                     epochs=self.config.ivapci_epochs,
                     device=self.config.ivapci_device,
                     n_bootstrap=self.config.n_bootstrap,
+                    progress={
+                        "edge_index": progress_state.get("edge_index", 1) if progress_state else 1,
+                        "edge_total": progress_state.get("edge_total", 1) if progress_state else 1,
+                        "base_scenario": (call_index - 1) * (1 + max(self.config.n_bootstrap, 0)) + 1
+                        if progress_state
+                        else 1,
+                        "total_scenarios": total_calls * (1 + max(self.config.n_bootstrap, 0))
+                        if total_calls
+                        else 1,
+                    },
                 )
                 return {
                     "tau": result["ate"],
@@ -670,6 +686,8 @@ class IVAPCIEffectEstimator:
         use_pacd: bool = False,
         use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
+        progress_state: Optional[Dict[str, int]] = None,
+        total_calls: int = 0,
     ) -> Dict:
         """估计总效应（不控制中介）"""
         return self.estimate_direct_effect(
@@ -681,6 +699,8 @@ class IVAPCIEffectEstimator:
             use_pacd=use_pacd,
             use_ivapci=use_ivapci,
             candidate_envs_override=candidate_envs_override,
+            progress_state=progress_state,
+            total_calls=total_calls,
         )
 
     def ipw_estimate(
@@ -797,6 +817,8 @@ class IVAPCIEffectEstimator:
         use_pacd: bool = False,
         use_ivapci: bool = True,
         candidate_envs_override: Optional[List[str]] = None,
+        progress_state: Optional[Dict[str, int]] = None,
+        total_calls: int = 0,
     ) -> Dict:
         """中介分析"""
         total = self.estimate_total_effect(
@@ -807,6 +829,8 @@ class IVAPCIEffectEstimator:
             use_pacd=use_pacd,
             use_ivapci=use_ivapci,
             candidate_envs_override=candidate_envs_override,
+            progress_state=progress_state,
+            total_calls=total_calls,
         )
 
         if potential_mediators:
@@ -819,6 +843,8 @@ class IVAPCIEffectEstimator:
                 use_pacd=use_pacd,
                 use_ivapci=use_ivapci,
                 candidate_envs_override=candidate_envs_override,
+                progress_state=progress_state,
+                total_calls=total_calls,
             )
         else:
             direct = total
@@ -1098,6 +1124,22 @@ class PACDIVAPCIPipeline:
         self.effect_results_ = []
 
         total_edges = len(sorted_edges)
+        total_ivapci_calls = 0
+        for edge_index, edge in enumerate(sorted_edges):
+            potential_mediators = self._select_mediators(edge["source"], edge["target"])
+            use_deep = edge_index < self.config.top_k_ivapci
+            use_ivapci = use_deep and self.config.estimator == "ivapci"
+            if use_ivapci:
+                total_ivapci_calls += 2 if potential_mediators else 1
+
+        if total_ivapci_calls:
+            total_scenarios = total_ivapci_calls * (1 + max(self.config.n_bootstrap, 0))
+            print(
+                f"  ✓ IVAPCI 场景数: {total_ivapci_calls} 个效应估计, "
+                f"{total_scenarios} 次训练"
+            )
+
+        progress_state = {"call_index": 0, "edge_total": total_edges}
         for idx, edge in enumerate(sorted_edges):
             source = edge["source"]
             target = edge["target"]
@@ -1122,6 +1164,7 @@ class PACDIVAPCIPipeline:
             print(f"\n  [{idx + 1}/{total_edges}] {source} → {target} {method_hint}")
 
             candidate_override = edge.get("intervention_valid_envs") or None
+            progress_state["edge_index"] = idx + 1
             mediation = self.effect_estimator.mediation_analysis(
                 data,
                 source,
@@ -1131,6 +1174,8 @@ class PACDIVAPCIPipeline:
                 use_pacd=(use_deep and use_pacd),
                 use_ivapci=use_ivapci,
                 candidate_envs_override=candidate_override,
+                progress_state=progress_state,
+                total_calls=total_ivapci_calls,
             )
 
             result = {
@@ -1377,6 +1422,9 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=80, help="训练轮数")
     parser.add_argument("--device", default="auto", help="计算设备 (auto/cpu/cuda)")
     parser.add_argument("--top-k", type=int, default=30, help="深度学习估计的边数")
+    parser.add_argument(
+        "--n-bootstrap", type=int, default=50, help="IVAPCI bootstrap 次数"
+    )
 
     parser.add_argument(
         "--effect-threshold",
@@ -1428,6 +1476,7 @@ def main() -> None:
         estimator=args.estimator,
         ivapci_epochs=args.epochs,
         ivapci_device=device,
+        n_bootstrap=args.n_bootstrap,
         top_k_ivapci=args.top_k,
         effect_threshold=args.effect_threshold,
         effect_threshold_quantile=args.effect_quantile,

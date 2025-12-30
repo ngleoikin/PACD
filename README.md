@@ -16,6 +16,7 @@ python run_pacd_ivapci_pipeline.py --data sachs_data.csv --output results/pacd
 - `--max-k`：最大条件集大小
 - `--estimator`：`ivapci`、`pacd` 或 `simple`
 - `--epochs`：IVAPCI/PACD-T 训练轮数
+- `--n-bootstrap`：IVAPCI bootstrap 次数
 - `--baseline-conds`：干预证据的基线条件（逗号分隔）
 - `--effect-threshold`：固定剪枝阈值（默认使用分位数）
 - `--effect-quantile`：分位数剪枝阈值
