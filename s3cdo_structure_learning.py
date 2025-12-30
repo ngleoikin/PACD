@@ -170,6 +170,16 @@ class S3CDOStructureLearner:
             self.sepsets_all_[key] = self._collect_sepsets(X, i, j, neighbors)
         return self.sepsets_all_[key]
 
+    def _build_sepsets_all(self, X: np.ndarray, edges: Set[Tuple[int, int]]) -> None:
+        d = X.shape[1]
+        self.sepsets_all_.clear()
+        for i in range(d):
+            for j in range(i + 1, d):
+                if (i, j) in edges:
+                    continue
+                neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
+                self.sepsets_all_[(i, j)] = self._collect_sepsets(X, i, j, neighbors)
+
     def _is_adjacent(
         self, a: int, b: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
     ) -> bool:
@@ -362,6 +372,7 @@ class S3CDOStructureLearner:
 
         self.skeleton_ = edges
         print(f"[S3CDO] skeleton edges: {len(self.skeleton_)}")
+        self._build_sepsets_all(X, edges)
         undirected = {tuple(sorted(e)) for e in edges}
         directed: Set[Tuple[int, int]] = set()
 
@@ -402,5 +413,11 @@ class S3CDOStructureLearner:
             "sepsets": {
                 f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
                 for (i, j), S in self.sepsets_.items()
+            },
+            "sepsets_all": {
+                f"{var_names[i]}|{var_names[j]}": [
+                    [var_names[s] for s in S] for S in sets
+                ]
+                for (i, j), sets in self.sepsets_all_.items()
             },
         }
