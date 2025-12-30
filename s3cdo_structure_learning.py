@@ -260,26 +260,30 @@ class S3CDOStructureLearner:
     ) -> None:
         if not self.config.orient_vstructures:
             return
+        unshielded = []
         for k in range(d):
             nbrs = [n for n in range(d) if n != k and self._is_adjacent(k, n, undirected, directed)]
             for i, j in combinations(nbrs, 2):
                 if self._is_adjacent(i, j, undirected, directed):
                     continue
-                neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
-                sepsets = self._get_sepsets(X, i, j, neighbors)
-                if not sepsets:
-                    continue
-                contains = [k in s for s in sepsets]
-                frac = sum(contains) / len(contains)
-                if self.config.collider_rule == "naive":
-                    should_orient = k not in sepsets[0]
-                elif self.config.collider_rule == "majority":
-                    should_orient = frac < self.config.collider_majority_threshold
-                else:
-                    should_orient = not any(contains) and all(not c for c in contains)
-                if should_orient:
-                    self._orient_edge(i, k, undirected, directed, check_cycle=False)
-                    self._orient_edge(j, k, undirected, directed, check_cycle=False)
+                unshielded.append((i, k, j))
+
+        for i, k, j in unshielded:
+            neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
+            sepsets = self._get_sepsets(X, i, j, neighbors)
+            if not sepsets:
+                continue
+            contains = [k in s for s in sepsets]
+            frac = sum(contains) / len(contains)
+            if self.config.collider_rule == "naive":
+                should_orient = k not in sepsets[0]
+            elif self.config.collider_rule == "majority":
+                should_orient = frac < self.config.collider_majority_threshold
+            else:
+                should_orient = not any(contains)
+            if should_orient:
+                self._orient_edge(i, k, undirected, directed, check_cycle=False)
+                self._orient_edge(j, k, undirected, directed, check_cycle=False)
 
     def _apply_meek_rules(
         self, d: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
@@ -355,8 +359,9 @@ class S3CDOStructureLearner:
 
         for k in range(self.config.max_k + 1):
             to_remove = []
-            for (i, j) in list(edges):
-                neighbors = self._neighbors(edges, i, j) | self._neighbors(edges, j, i)
+            edges_snapshot = set(edges)
+            for (i, j) in list(edges_snapshot):
+                neighbors = self._neighbors(edges_snapshot, i, j) | self._neighbors(edges_snapshot, j, i)
                 if len(neighbors) < k:
                     continue
                 for S in combinations(neighbors, k):
@@ -365,6 +370,8 @@ class S3CDOStructureLearner:
                         to_remove.append((i, j))
                         self.sepsets_[(i, j)] = list(S)
                         self.sepsets_[(j, i)] = list(S)
+                        key = (i, j) if i < j else (j, i)
+                        self.sepsets_all_.setdefault(key, []).append(list(S))
                         break
             for e in to_remove:
                 edges.discard(e)
@@ -372,7 +379,6 @@ class S3CDOStructureLearner:
 
         self.skeleton_ = edges
         print(f"[S3CDO] skeleton edges: {len(self.skeleton_)}")
-        self._build_sepsets_all(X, edges)
         undirected = {tuple(sorted(e)) for e in edges}
         directed: Set[Tuple[int, int]] = set()
 
