@@ -266,6 +266,12 @@ def main() -> None:
         directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
 
     _print_edges(args.direction.upper(), directed_edges)
+    total_edges = len(directed_edges)
+    total_trains = total_edges * (1 + max(args.n_bootstrap, 0))
+    print(
+        f"[IVAPCI] will estimate {total_edges} edges, "
+        f"{total_trains} total training runs (1 + n_bootstrap per edge)"
+    )
 
     if not is_ivapci_available():
         _, _, err = load_ivapci()
