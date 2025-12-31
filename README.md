@@ -201,6 +201,34 @@ python run_direction_ivapci_pipeline.py \
   --n-bootstrap 2
 ```
 
+仅运行 S3C-DO 结构学习（不跑 IVAPCI）的脚本示例：
+
+```bash
+python - <<'PY'
+import pandas as pd
+from s3cdo_structure_learning import S3CDOConfig, S3CDOStructureLearner
+
+df = pd.read_csv("multienv_soft_low.csv")
+X = df.select_dtypes("number").values
+var_names = list(df.select_dtypes("number").columns)
+
+cfg = S3CDOConfig(
+    top_m=10,
+    alpha=0.01,
+    max_k=3,
+    ci_method="spearman",
+    ci_perm_samples=200,
+    collider_rule="cpc",
+)
+learner = S3CDOStructureLearner(cfg)
+result = learner.learn(X, var_names)
+
+print("candidate_edges:", len(result["candidate_edges"]))
+print("skeleton:", len(result["skeleton"]))
+print("directed_edges:", len(result["directed_edges"]))
+PY
+```
+
 常用参数：
 
 - `--direction`：`pc` / `pacd` / `mpcd` / `s3cdo`

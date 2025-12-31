@@ -331,8 +331,8 @@ class S3CDOStructureLearner:
             else:
                 should_orient = not any(contains)
             if should_orient:
-                self._orient_edge(i, k, undirected, directed, check_cycle=False)
-                self._orient_edge(j, k, undirected, directed, check_cycle=False)
+                self._orient_edge(i, k, undirected, directed, check_cycle=self.config.ensure_acyclic)
+                self._orient_edge(j, k, undirected, directed, check_cycle=self.config.ensure_acyclic)
 
     def _apply_meek_rules(
         self, d: int, undirected: Set[Tuple[int, int]], directed: Set[Tuple[int, int]]
@@ -355,16 +355,16 @@ class S3CDOStructureLearner:
                     if c == a:
                         continue
                     if not self._is_adjacent(a, c, undirected, directed):
-                        if self._orient_edge(b, c, undirected, directed, check_cycle=False):
+                        if self._orient_edge(b, c, undirected, directed, check_cycle=self.config.ensure_acyclic):
                             changed = True
 
             und_list = list(undirected)
             for (u, v) in und_list:
                 if self._has_directed_path(u, v, directed):
-                    if self._orient_edge(u, v, undirected, directed, check_cycle=False):
+                    if self._orient_edge(u, v, undirected, directed, check_cycle=self.config.ensure_acyclic):
                         changed = True
                 elif self._has_directed_path(v, u, directed):
-                    if self._orient_edge(v, u, undirected, directed, check_cycle=False):
+                    if self._orient_edge(v, u, undirected, directed, check_cycle=self.config.ensure_acyclic):
                         changed = True
 
             # R3: a-b, a-c 均无向, b->d, c->d, b and c nonadjacent, a-d => a->d
@@ -379,7 +379,7 @@ class S3CDOStructureLearner:
                         if self._is_adjacent(b, c, undirected, directed):
                             continue
                         if (b, d_node) in directed and (c, d_node) in directed:
-                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=False):
+                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=self.config.ensure_acyclic):
                                 changed = True
                             break
 
@@ -393,7 +393,7 @@ class S3CDOStructureLearner:
                         if c in (a, b) or not self._is_undirected(a, c, undirected):
                             continue
                         if (b, c) in directed and (b, d_node) in directed and (c, d_node) in directed:
-                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=False):
+                            if self._orient_edge(a, d_node, undirected, directed, check_cycle=self.config.ensure_acyclic):
                                 changed = True
                             break
 
