@@ -36,6 +36,7 @@ class S3CDOConfig:
     ci_perm_samples: int = 200
     collider_rule: str = "cpc"  # naive / cpc / majority
     collider_majority_threshold: float = 0.5
+    seed: Optional[int] = None
 
     # Orient
     orient_vstructures: bool = True
@@ -96,7 +97,7 @@ class S3CDOStructureLearner:
                 r, _ = pearsonr(X[:, i], X[:, j])
             else:
                 r, _ = spearmanr(X[:, i], X[:, j])
-                rng = np.random.default_rng(42)
+                rng = np.random.default_rng(self.config.seed)
                 perm_stats = []
                 for _ in range(self.config.ci_perm_samples):
                     perm = rng.permutation(X[:, j])
@@ -130,7 +131,7 @@ class S3CDOStructureLearner:
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
         else:
             r, _ = spearmanr(res_i, res_j)
-            rng = np.random.default_rng(42)
+            rng = np.random.default_rng(self.config.seed)
             perm_stats = []
             for _ in range(self.config.ci_perm_samples):
                 perm = rng.permutation(res_j)
@@ -269,12 +270,12 @@ class S3CDOStructureLearner:
                 unshielded.append((i, k, j))
 
         for i, k, j in unshielded:
-            neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
-            sepsets = self._get_sepsets(X, i, j, neighbors)
-            if not sepsets:
-                continue
-            contains = [k in s for s in sepsets]
-            frac = sum(contains) / len(contains)
+                key = (i, j) if i < j else (j, i)
+                sepsets = self.sepsets_all_.get(key, [])
+                if not sepsets:
+                    continue
+                contains = [k in s for s in sepsets]
+                frac = sum(contains) / len(contains)
             if self.config.collider_rule == "naive":
                 should_orient = k not in sepsets[0]
             elif self.config.collider_rule == "majority":
@@ -355,6 +356,14 @@ class S3CDOStructureLearner:
 
         candidate_edges = self._screen(X)
         print(f"[S3CDO] screen edges: {len(candidate_edges)}")
+        if (
+            self.config.ci_method == "spearman"
+            and self.config.alpha < 1.0 / (self.config.ci_perm_samples + 1)
+        ):
+            min_p = 1.0 / (self.config.ci_perm_samples + 1)
+            print(
+                f"[S3CDO] warning: alpha={self.config.alpha} below permutation resolution {min_p:.4f}"
+            )
         edges = set(candidate_edges)
 
         for k in range(self.config.max_k + 1):
@@ -364,15 +373,20 @@ class S3CDOStructureLearner:
                 neighbors = self._neighbors(edges_snapshot, i, j) | self._neighbors(edges_snapshot, j, i)
                 if len(neighbors) < k:
                     continue
+                found = False
+                first_sepset: Optional[List[int]] = None
                 for S in combinations(neighbors, k):
                     is_indep, _, _ = self._partial_corr_test(X, i, j, list(S))
                     if is_indep:
-                        to_remove.append((i, j))
-                        self.sepsets_[(i, j)] = list(S)
-                        self.sepsets_[(j, i)] = list(S)
                         key = (i, j) if i < j else (j, i)
                         self.sepsets_all_.setdefault(key, []).append(list(S))
-                        break
+                        if not found:
+                            found = True
+                            first_sepset = list(S)
+                if found:
+                    to_remove.append((i, j))
+                    self.sepsets_[(i, j)] = first_sepset or []
+                    self.sepsets_[(j, i)] = first_sepset or []
             for e in to_remove:
                 edges.discard(e)
             print(f"[S3CDO] clean k={k} edges: {len(edges)}")
