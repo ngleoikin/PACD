@@ -229,24 +229,48 @@ print("directed_edges:", len(result["directed_edges"]))
 PY
 ```
 
-常用参数：
+常用参数（完整说明）：
 
-- `--direction`：`pc` / `pacd` / `mpcd` / `s3cdo`
-- `--alpha` / `--max-k`：结构学习参数
-- `--epochs`：IVAPCI 训练轮数
-- `--device`：计算设备（`cpu`/`cuda`）
-- `--n-bootstrap`：bootstrap 次数
-- `--s3cdo-top-m`：S3C-DO 筛选阶段每个节点保留的候选邻居数
-- `--s3cdo-ci-method`：S3C-DO CI 检验方法（`spearman` / `pearson`）
-- `--s3cdo-use-nonparanormal`：启用 nonparanormal 变换
-- `--s3cdo-ci-perm-samples`：Spearman 置换检验次数
-- `--s3cdo-auto-fix-perm-resolution`：自动将 alpha 调整到置换检验分辨率（可用 `--no-s3cdo-auto-fix-perm-resolution` 关闭）
-- `--s3cdo-collider-rule`：碰撞点规则（`naive` / `cpc` / `majority`）
-- `--s3cdo-collider-majority-threshold`：Majority 阈值
-- `--s3cdo-fallback-sepset-search`：对缺失 sepset 的三元组做补搜
-- `--s3cdo-fallback-max-k`：补搜使用的最大条件集大小
-- `--baseline-conds`：多环境基线条件（逗号分隔）
-- `--intervention`：干预映射 JSON 文件（可选）
+- `--direction`：方向学习方法。
+  - `pc`：传统 PC（仅基于条件独立）。
+  - `pacd`：p-adic PACD，默认推荐；单环境也可用。
+  - `mpcd`：多尺度 PACD，适合希望稳定性更强的场景。
+  - `s3cdo`：筛选-清洗-定向（S3C-DO），适合高维稀疏结构。
+- `--alpha`：CI 显著性水平；越小越保守（删边更少）。
+- `--max-k`：条件集最大大小；越大越耗时，且需要更多样本支撑。
+- `--epochs`：IVAPCI 训练轮数（方向估计时使用）。
+- `--device`：IVAPCI 训练设备（`cpu` / `cuda`）。
+- `--n-bootstrap`：IVAPCI bootstrap 次数（不确定性估计，>0 时更稳但更慢）。
+
+S3C-DO 相关（仅在 `--direction s3cdo` 时生效）：
+- `--s3cdo-top-m`：筛选阶段每个节点保留的候选邻居数；大一些可降低漏边风险，但会增加后续计算量。
+- `--s3cdo-ci-method`：CI 检验方法（`spearman` / `pearson`）。
+  - `spearman` 更稳健但需置换检验；`pearson` 更快但对异常值敏感。
+- `--s3cdo-use-nonparanormal`：启用 nonparanormal 变换；当变量分布明显非高斯时建议开启。
+- `--s3cdo-ci-perm-samples`：Spearman 置换检验次数 `B`（默认 200）；越大 p 值分辨率越细但更慢。
+- `--s3cdo-auto-fix-perm-resolution`：自动将 `alpha` 抬升到 `1/(B+1)` 的分辨率；
+  - 可用 `--no-s3cdo-auto-fix-perm-resolution` 关闭（不推荐，可能导致过度保守）。
+- `--s3cdo-collider-rule`：碰撞点规则（`naive` / `cpc` / `majority`）。
+  - `cpc`：默认规则，优先避免错误定向；
+  - `majority`：按多数分离集判断；
+  - `naive`：只看第一组分离集（速度快但最不稳）。
+- `--s3cdo-collider-majority-threshold`：`majority` 规则阈值（默认 0.5）。
+- `--s3cdo-fallback-sepset-search`：对缺失 sepset 的三元组做补搜；
+  - 当 `sepsets_all_` 缺失时，用邻域条件集补充独立证据。
+- `--s3cdo-fallback-max-k`：补搜使用的最大条件集大小；为空则使用全局 `--max-k`。
+
+PACD/MPCD 相关（仅在 `--direction pacd/mpcd` 时生效）：
+- `--mpcd-m-grid`：MPCD 的多尺度列表（如 `2,3,4,5`）。
+- `--mpcd-stability-tau`：MPCD 稳定性阈值；越高越保守。
+
+多环境/干预相关（当数据含 `COND` 列，或显式启用多环境逻辑时生效）：
+- `--baseline-conds`：多环境基线条件（逗号分隔）；用于区分干预环境。
+- `--intervention`：干预映射 JSON 文件（可选）；若不提供，会把非基线环境视为干预。
+
+使用建议：
+- 小样本或噪声大：`--direction pacd`，适当减小 `--max-k`；
+- 高维稀疏：`--direction s3cdo`，增加 `--s3cdo-top-m` 但注意计算成本；
+- 多环境数据：设置 `--baseline-conds` 并提供 `--intervention`（若有先验）。
 
 多环境数据（含 `COND`）使用说明：
 
