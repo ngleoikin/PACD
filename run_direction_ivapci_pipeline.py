@@ -281,12 +281,16 @@ def main() -> None:
     parser.add_argument(
         "--s3cdo-bootstrap-threshold",
         type=float,
+        nargs="?",
+        const=0.95,
         default=0.95,
         help="Skeleton stability threshold for S3C-DO bootstrap",
     )
     parser.add_argument(
         "--s3cdo-dir-threshold",
         type=float,
+        nargs="?",
+        const=0.95,
         default=0.95,
         help="Direction stability threshold for S3C-DO bootstrap",
     )
