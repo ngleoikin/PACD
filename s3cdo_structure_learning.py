@@ -95,15 +95,17 @@ class S3CDOStructureLearner:
         self, X: np.ndarray, i: int, j: int, S: List[int]
     ) -> Tuple[bool, float, float]:
         n = X.shape[0]
+        alpha_eff = self.config.alpha
+        if self.config.ci_method == "spearman":
+            min_p = 1.0 / (self.config.ci_perm_samples + 1)
+            if self.config.auto_fix_perm_resolution and alpha_eff < min_p:
+                alpha_eff = min_p
+
         if not S:
             if self.config.ci_method == "pearson":
                 r, _ = pearsonr(X[:, i], X[:, j])
             else:
                 r, _ = spearmanr(X[:, i], X[:, j])
-                if self.config.auto_fix_perm_resolution:
-                    min_p = 1.0 / (self.config.ci_perm_samples + 1)
-                    if self.config.alpha < min_p:
-                        self.config.alpha = min_p
                 rng = self._permutation_rng(i, j, [])
                 perm_stats = []
                 for _ in range(self.config.ci_perm_samples):
@@ -114,11 +116,11 @@ class S3CDOStructureLearner:
                     (np.sum(np.array(perm_stats) >= abs(r)) + 1)
                     / (len(perm_stats) + 1)
                 )
-                return p_value > self.config.alpha, r, p_value
+                return p_value > alpha_eff, r, p_value
             z = 0.5 * np.log((1 + r + 1e-10) / (1 - r + 1e-10))
             se = 1.0 / np.sqrt(n - 3)
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
-            return p_value > self.config.alpha, r, p_value
+            return p_value > alpha_eff, r, p_value
 
         X_S = X[:, S]
         if self.config.ci_method == "pearson":
@@ -138,10 +140,6 @@ class S3CDOStructureLearner:
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
         else:
             r, _ = spearmanr(res_i, res_j)
-            if self.config.auto_fix_perm_resolution:
-                min_p = 1.0 / (self.config.ci_perm_samples + 1)
-                if self.config.alpha < min_p:
-                    self.config.alpha = min_p
             rng = self._permutation_rng(i, j, S)
             perm_stats = []
             for _ in range(self.config.ci_perm_samples):
@@ -152,7 +150,7 @@ class S3CDOStructureLearner:
                 (np.sum(np.array(perm_stats) >= abs(r)) + 1)
                 / (len(perm_stats) + 1)
             )
-        return p_value > self.config.alpha, r, p_value
+        return p_value > alpha_eff, r, p_value
 
     def _neighbors(self, edges: Set[Tuple[int, int]], node: int, exclude: int) -> Set[int]:
         neighbors: Set[int] = set()
@@ -463,7 +461,6 @@ class S3CDOStructureLearner:
             )
 
         for (u, v) in sorted(undirected):
-            sepset_idx = self.sepsets_.get((u, v)) or self.sepsets_.get((v, u)) or []
             directed_edges.append(
                 {
                     "source": var_names[u],
