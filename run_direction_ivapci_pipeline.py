@@ -244,6 +244,12 @@ def main() -> None:
         help="S3C-DO permutation samples for Spearman CI",
     )
     parser.add_argument(
+        "--s3cdo-auto-fix-perm-resolution",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Auto-fix alpha to permutation resolution for S3C-DO Spearman CI",
+    )
+    parser.add_argument(
         "--s3cdo-collider-rule",
         choices=["naive", "cpc", "majority"],
         default="cpc",
@@ -353,6 +359,7 @@ def main() -> None:
                 ci_method=args.s3cdo_ci_method,
                 use_nonparanormal=args.s3cdo_use_nonparanormal,
                 ci_perm_samples=args.s3cdo_ci_perm_samples,
+                auto_fix_perm_resolution=args.s3cdo_auto_fix_perm_resolution,
                 collider_rule=args.s3cdo_collider_rule,
                 collider_majority_threshold=args.s3cdo_collider_majority_threshold,
                 fallback_sepset_search=args.s3cdo_fallback_sepset_search,

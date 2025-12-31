@@ -240,6 +240,7 @@ PY
 - `--s3cdo-ci-method`：S3C-DO CI 检验方法（`spearman` / `pearson`）
 - `--s3cdo-use-nonparanormal`：启用 nonparanormal 变换
 - `--s3cdo-ci-perm-samples`：Spearman 置换检验次数
+- `--s3cdo-auto-fix-perm-resolution`：自动将 alpha 调整到置换检验分辨率（可用 `--no-s3cdo-auto-fix-perm-resolution` 关闭）
 - `--s3cdo-collider-rule`：碰撞点规则（`naive` / `cpc` / `majority`）
 - `--s3cdo-collider-majority-threshold`：Majority 阈值
 - `--s3cdo-fallback-sepset-search`：对缺失 sepset 的三元组做补搜

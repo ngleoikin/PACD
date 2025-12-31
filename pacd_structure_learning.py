@@ -663,6 +663,7 @@ class PACDStructureLearner:
         sepsets_named = {
             f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
             for (i, j), S in self.sepsets_.items()
+            if i < j
         }
         directed_count = sum(
             1 for edge in directed if edge.get("orientation_method") != "undirected"
@@ -927,6 +928,7 @@ class MPCDStructureLearner(PACDStructureLearner):
         sepsets_named = {
             f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
             for (i, j), S in self.sepsets_.items()
+            if i < j
         }
         edge_persistence = [
             {

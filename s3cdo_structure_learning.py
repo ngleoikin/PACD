@@ -10,6 +10,7 @@ S3C-DO 结构学习模块
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
@@ -56,6 +57,11 @@ class S3CDOStructureLearner:
         self.sepsets_: Dict[Tuple[int, int], List[int]] = {}
         self.sepsets_all_: Dict[Tuple[int, int], List[List[int]]] = {}
         self.edge_scores_: Dict[Tuple[int, int], float] = {}
+        self._alpha_eff_warned = False
+
+    @property
+    def _logger(self) -> logging.Logger:
+        return logging.getLogger(__name__)
 
     def _nonparanormal_transform(self, X: np.ndarray) -> np.ndarray:
         n, d = X.shape
@@ -100,6 +106,13 @@ class S3CDOStructureLearner:
             min_p = 1.0 / (self.config.ci_perm_samples + 1)
             if self.config.auto_fix_perm_resolution and alpha_eff < min_p:
                 alpha_eff = min_p
+                if not self._alpha_eff_warned:
+                    self._logger.warning(
+                        "[S3CDO] alpha adjusted to permutation resolution: %.6f (min_p=%.6f)",
+                        alpha_eff,
+                        min_p,
+                    )
+                    self._alpha_eff_warned = True
 
         if not S:
             if self.config.ci_method == "pearson":
@@ -290,6 +303,7 @@ class S3CDOStructureLearner:
         d: int,
         undirected: Set[Tuple[int, int]],
         directed: Set[Tuple[int, int]],
+        undirected_snapshot: Set[Tuple[int, int]],
     ) -> None:
         if not self.config.orient_vstructures:
             return
@@ -305,8 +319,10 @@ class S3CDOStructureLearner:
             key = (i, j) if i < j else (j, i)
             sepsets = self.sepsets_all_.get(key, [])
             if not sepsets and self.config.fallback_sepset_search:
-                neighbors = self._neighbors_undirected(undirected, i, j) | self._neighbors_undirected(
-                    undirected, j, i
+                neighbors = self._neighbors_undirected(
+                    undirected_snapshot, i, j
+                ) | self._neighbors_undirected(
+                    undirected_snapshot, j, i
                 )
                 fallback_k = self.config.fallback_max_k
                 sepsets = self._collect_sepsets(X, i, j, neighbors, max_k=fallback_k)
@@ -314,6 +330,7 @@ class S3CDOStructureLearner:
                     self.sepsets_all_[key] = sepsets
             if not sepsets:
                 continue
+            # de-duplicate sepsets before collider decision
             unique_sets = []
             seen = set()
             for s in sepsets:
@@ -442,9 +459,12 @@ class S3CDOStructureLearner:
         self.skeleton_ = edges
         print(f"[S3CDO] skeleton edges: {len(self.skeleton_)}")
         undirected = {tuple(sorted(e)) for e in edges}
+        undirected_snapshot = set(undirected)
         directed: Set[Tuple[int, int]] = set()
 
-        self._orient_vstructures(X, X.shape[1], undirected, directed)
+        self._orient_vstructures(
+            X, X.shape[1], undirected, directed, undirected_snapshot
+        )
         self._apply_meek_rules(X.shape[1], undirected, directed)
         print(f"[S3CDO] directed edges: {len(directed)} undirected: {len(undirected)}")
 
@@ -479,6 +499,7 @@ class S3CDOStructureLearner:
             "sepsets": {
                 f"{var_names[i]}|{var_names[j]}": [var_names[s] for s in S]
                 for (i, j), S in self.sepsets_.items()
+                if i < j
             },
             "sepsets_all": {
                 f"{var_names[i]}|{var_names[j]}": [

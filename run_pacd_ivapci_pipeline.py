@@ -333,6 +333,8 @@ class PACDSkeletonLearner:
         }
 
         for (i, j), S in self.sepsets_.items():
+            if i > j:
+                continue
             key = f"{var_names[i]}|{var_names[j]}"
             result["sepsets"][key] = [var_names[s] for s in S]
 
