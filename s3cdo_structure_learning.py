@@ -217,6 +217,7 @@ class S3CDOStructureLearner:
         return np.random.default_rng(self.config.seed + salt)
 
     def _build_sepsets_all(self, X: np.ndarray, edges: Set[Tuple[int, int]]) -> None:
+        """可选的全量 sepset 构建（默认流程不启用，成本较高且可能引入噪声）。"""
         d = X.shape[1]
         self.sepsets_all_.clear()
         for i in range(d):
