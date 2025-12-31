@@ -270,12 +270,12 @@ class S3CDOStructureLearner:
                 unshielded.append((i, k, j))
 
         for i, k, j in unshielded:
-                key = (i, j) if i < j else (j, i)
-                sepsets = self.sepsets_all_.get(key, [])
-                if not sepsets:
-                    continue
-                contains = [k in s for s in sepsets]
-                frac = sum(contains) / len(contains)
+            key = (i, j) if i < j else (j, i)
+            sepsets = self.sepsets_all_.get(key, [])
+            if not sepsets:
+                continue
+            contains = [k in s for s in sepsets]
+            frac = sum(contains) / len(contains)
             if self.config.collider_rule == "naive":
                 should_orient = k not in sepsets[0]
             elif self.config.collider_rule == "majority":
