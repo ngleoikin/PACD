@@ -212,6 +212,10 @@ python run_direction_ivapci_pipeline.py \
 - `--s3cdo-ci-method`：S3C-DO CI 检验方法（`spearman` / `pearson`）
 - `--s3cdo-use-nonparanormal`：启用 nonparanormal 变换
 - `--s3cdo-ci-perm-samples`：Spearman 置换检验次数
+- `--s3cdo-collider-rule`：碰撞点规则（`naive` / `cpc` / `majority`）
+- `--s3cdo-collider-majority-threshold`：Majority 阈值
+- `--s3cdo-fallback-sepset-search`：对缺失 sepset 的三元组做补搜
+- `--s3cdo-fallback-max-k`：补搜使用的最大条件集大小
 - `--baseline-conds`：多环境基线条件（逗号分隔）
 - `--intervention`：干预映射 JSON 文件（可选）
 

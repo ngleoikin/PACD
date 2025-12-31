@@ -39,6 +39,7 @@ class S3CDOConfig:
     seed: Optional[int] = None
     fallback_sepset_search: bool = False
     fallback_max_k: Optional[int] = None
+    auto_fix_perm_resolution: bool = True
 
     # Orient
     orient_vstructures: bool = True
@@ -99,6 +100,10 @@ class S3CDOStructureLearner:
                 r, _ = pearsonr(X[:, i], X[:, j])
             else:
                 r, _ = spearmanr(X[:, i], X[:, j])
+                if self.config.auto_fix_perm_resolution:
+                    min_p = 1.0 / (self.config.ci_perm_samples + 1)
+                    if self.config.alpha < min_p:
+                        self.config.alpha = min_p
                 rng = self._permutation_rng(i, j, [])
                 perm_stats = []
                 for _ in range(self.config.ci_perm_samples):
@@ -133,6 +138,10 @@ class S3CDOStructureLearner:
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
         else:
             r, _ = spearmanr(res_i, res_j)
+            if self.config.auto_fix_perm_resolution:
+                min_p = 1.0 / (self.config.ci_perm_samples + 1)
+                if self.config.alpha < min_p:
+                    self.config.alpha = min_p
             rng = self._permutation_rng(i, j, S)
             perm_stats = []
             for _ in range(self.config.ci_perm_samples):
@@ -148,6 +157,17 @@ class S3CDOStructureLearner:
     def _neighbors(self, edges: Set[Tuple[int, int]], node: int, exclude: int) -> Set[int]:
         neighbors: Set[int] = set()
         for (a, b) in edges:
+            if a == node and b != exclude:
+                neighbors.add(b)
+            elif b == node and a != exclude:
+                neighbors.add(a)
+        return neighbors
+
+    def _neighbors_undirected(
+        self, undirected: Set[Tuple[int, int]], node: int, exclude: int
+    ) -> Set[int]:
+        neighbors: Set[int] = set()
+        for (a, b) in undirected:
             if a == node and b != exclude:
                 neighbors.add(b)
             elif b == node and a != exclude:
@@ -287,13 +307,23 @@ class S3CDOStructureLearner:
             key = (i, j) if i < j else (j, i)
             sepsets = self.sepsets_all_.get(key, [])
             if not sepsets and self.config.fallback_sepset_search:
-                neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
+                neighbors = self._neighbors_undirected(undirected, i, j) | self._neighbors_undirected(
+                    undirected, j, i
+                )
                 fallback_k = self.config.fallback_max_k
                 sepsets = self._collect_sepsets(X, i, j, neighbors, max_k=fallback_k)
                 if sepsets:
                     self.sepsets_all_[key] = sepsets
             if not sepsets:
                 continue
+            unique_sets = []
+            seen = set()
+            for s in sepsets:
+                key_s = tuple(sorted(s))
+                if key_s not in seen:
+                    seen.add(key_s)
+                    unique_sets.append(s)
+            sepsets = unique_sets
             contains = [k in s for s in sepsets]
             frac = sum(contains) / len(contains)
             if self.config.collider_rule == "naive":
@@ -422,14 +452,13 @@ class S3CDOStructureLearner:
 
         directed_edges: List[Dict] = []
         for (src, dst) in sorted(directed):
-            sepset_idx = self.sepsets_.get((src, dst)) or self.sepsets_.get((dst, src)) or []
             directed_edges.append(
                 {
                     "source": var_names[src],
                     "target": var_names[dst],
                     "orientation_method": "rule",
                     "direction_confidence": "rule",
-                    "sepset": [var_names[s] for s in sepset_idx],
+                    "evidence": {"type": "collider_or_rule"},
                 }
             )
 
@@ -441,7 +470,7 @@ class S3CDOStructureLearner:
                     "target": var_names[v],
                     "orientation_method": "undirected",
                     "direction_confidence": "undecided",
-                    "sepset": [var_names[s] for s in sepset_idx],
+                    "evidence": {"type": "undirected"},
                 }
             )
 

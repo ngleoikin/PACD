@@ -244,6 +244,29 @@ def main() -> None:
         help="S3C-DO permutation samples for Spearman CI",
     )
     parser.add_argument(
+        "--s3cdo-collider-rule",
+        choices=["naive", "cpc", "majority"],
+        default="cpc",
+        help="S3C-DO collider rule (naive/cpc/majority)",
+    )
+    parser.add_argument(
+        "--s3cdo-collider-majority-threshold",
+        type=float,
+        default=0.5,
+        help="S3C-DO majority rule threshold",
+    )
+    parser.add_argument(
+        "--s3cdo-fallback-sepset-search",
+        action="store_true",
+        help="Enable fallback sepset search for unshielded triples",
+    )
+    parser.add_argument(
+        "--s3cdo-fallback-max-k",
+        type=int,
+        default=None,
+        help="Fallback max-k for sepset search",
+    )
+    parser.add_argument(
         "--mpcd-m-grid",
         default="",
         help="MPCD scales, comma-separated (e.g. 2,3,4,5)",
@@ -330,6 +353,10 @@ def main() -> None:
                 ci_method=args.s3cdo_ci_method,
                 use_nonparanormal=args.s3cdo_use_nonparanormal,
                 ci_perm_samples=args.s3cdo_ci_perm_samples,
+                collider_rule=args.s3cdo_collider_rule,
+                collider_majority_threshold=args.s3cdo_collider_majority_threshold,
+                fallback_sepset_search=args.s3cdo_fallback_sepset_search,
+                fallback_max_k=args.s3cdo_fallback_max_k,
             )
             s3_learner = S3CDOStructureLearner(s3_cfg)
             s3_result = s3_learner.learn(data.values, var_names)
