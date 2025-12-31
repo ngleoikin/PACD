@@ -368,9 +368,36 @@ def main() -> None:
             s3_learner = S3CDOStructureLearner(s3_cfg)
             s3_result = s3_learner.learn(data.values, var_names)
             directed_edges = s3_result["directed_edges"]
+            sepsets = s3_result.get("sepsets", {})
         else:
             pc_result = _run_pc(data.values, args.alpha, args.max_k)
             directed_edges = _directed_edges_from_pc(pc_result.G, var_names)
+            sepsets = {}
+
+        if "COND" in df.columns:
+            baseline_conds = [
+                item.strip()
+                for item in args.baseline_conds.split(",")
+                if item.strip()
+            ]
+            if not baseline_conds:
+                baseline_conds = list(PipelineConfig().baseline_conditions)
+            if args.intervention:
+                with open(args.intervention, "r", encoding="utf-8") as handle:
+                    intervention_map = json.load(handle)
+            else:
+                intervention_map = _default_intervention_map(
+                    sorted(df["COND"].astype(str).unique()),
+                    baseline_conds,
+                    var_names,
+                )
+            directed_edges = _apply_intervention_evidence(
+                df,
+                directed_edges,
+                sepsets,
+                baseline_conds,
+                intervention_map,
+            )
 
     _print_edges(args.direction.upper(), directed_edges)
     total_edges = len(directed_edges)
