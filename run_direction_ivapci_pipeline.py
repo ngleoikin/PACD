@@ -289,6 +289,11 @@ def main() -> None:
     parser.add_argument("--device", default="cpu", help="Device (cpu/cuda)")
     parser.add_argument("--n-bootstrap", type=int, default=50, help="Bootstrap samples")
     parser.add_argument(
+        "--only-structure",
+        action="store_true",
+        help="Only run structure learning and save directed edges without IVAPCI",
+    )
+    parser.add_argument(
         "--baseline-conds",
         default="",
         help="Comma-separated baseline COND values for intervention evidence (e.g. env_0)",
@@ -400,6 +405,18 @@ def main() -> None:
             )
 
     _print_edges(args.direction.upper(), directed_edges)
+    if args.only_structure:
+        os.makedirs(args.output, exist_ok=True)
+        pd.DataFrame(directed_edges).to_csv(
+            os.path.join(args.output, "directed_edges.csv"), index=False
+        )
+        with open(
+            os.path.join(args.output, "directed_edges.json"), "w", encoding="utf-8"
+        ) as handle:
+            json.dump({"edges": directed_edges, "method": args.direction}, handle, indent=2)
+        print(f"Saved directed edges to {args.output}/")
+        return
+
     total_edges = len(directed_edges)
     total_trains = total_edges * (1 + max(args.n_bootstrap, 0))
     print(

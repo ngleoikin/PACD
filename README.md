@@ -241,6 +241,7 @@ PY
 - `--epochs`：IVAPCI 训练轮数（方向估计时使用）。
 - `--device`：IVAPCI 训练设备（`cpu` / `cuda`）。
 - `--n-bootstrap`：IVAPCI bootstrap 次数（不确定性估计，>0 时更稳但更慢）。
+- `--only-structure`：仅做结构学习，输出 `directed_edges.csv/json`，跳过 IVAPCI 估计。
 
 S3C-DO 相关（仅在 `--direction s3cdo` 时生效）：
 - `--s3cdo-top-m`：筛选阶段每个节点保留的候选邻居数；大一些可降低漏边风险，但会增加后续计算量。
