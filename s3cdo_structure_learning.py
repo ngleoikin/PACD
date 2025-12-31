@@ -37,6 +37,8 @@ class S3CDOConfig:
     collider_rule: str = "cpc"  # naive / cpc / majority
     collider_majority_threshold: float = 0.5
     seed: Optional[int] = None
+    fallback_sepset_search: bool = False
+    fallback_max_k: Optional[int] = None
 
     # Orient
     orient_vstructures: bool = True
@@ -97,7 +99,7 @@ class S3CDOStructureLearner:
                 r, _ = pearsonr(X[:, i], X[:, j])
             else:
                 r, _ = spearmanr(X[:, i], X[:, j])
-                rng = np.random.default_rng(self.config.seed)
+                rng = self._permutation_rng(i, j, [])
                 perm_stats = []
                 for _ in range(self.config.ci_perm_samples):
                     perm = rng.permutation(X[:, j])
@@ -131,7 +133,7 @@ class S3CDOStructureLearner:
             p_value = 2 * (1 - norm.cdf(abs(z) / se))
         else:
             r, _ = spearmanr(res_i, res_j)
-            rng = np.random.default_rng(self.config.seed)
+            rng = self._permutation_rng(i, j, S)
             perm_stats = []
             for _ in range(self.config.ci_perm_samples):
                 perm = rng.permutation(res_j)
@@ -153,10 +155,16 @@ class S3CDOStructureLearner:
         return neighbors
 
     def _collect_sepsets(
-        self, X: np.ndarray, i: int, j: int, neighbors: Set[int]
+        self,
+        X: np.ndarray,
+        i: int,
+        j: int,
+        neighbors: Set[int],
+        max_k: Optional[int] = None,
     ) -> List[List[int]]:
         sepsets: List[List[int]] = []
-        for k in range(self.config.max_k + 1):
+        limit_k = self.config.max_k if max_k is None else max_k
+        for k in range(limit_k + 1):
             if len(neighbors) < k:
                 continue
             for S in combinations(neighbors, k):
@@ -170,6 +178,12 @@ class S3CDOStructureLearner:
         if key not in self.sepsets_all_:
             self.sepsets_all_[key] = self._collect_sepsets(X, i, j, neighbors)
         return self.sepsets_all_[key]
+
+    def _permutation_rng(self, i: int, j: int, S: List[int]) -> np.random.Generator:
+        if self.config.seed is None:
+            return np.random.default_rng()
+        salt = hash((i, j, tuple(S))) & 0xFFFFFFFF
+        return np.random.default_rng(self.config.seed + salt)
 
     def _build_sepsets_all(self, X: np.ndarray, edges: Set[Tuple[int, int]]) -> None:
         d = X.shape[1]
@@ -272,6 +286,12 @@ class S3CDOStructureLearner:
         for i, k, j in unshielded:
             key = (i, j) if i < j else (j, i)
             sepsets = self.sepsets_all_.get(key, [])
+            if not sepsets and self.config.fallback_sepset_search:
+                neighbors = self._neighbors(undirected, i, j) | self._neighbors(undirected, j, i)
+                fallback_k = self.config.fallback_max_k
+                sepsets = self._collect_sepsets(X, i, j, neighbors, max_k=fallback_k)
+                if sepsets:
+                    self.sepsets_all_[key] = sepsets
             if not sepsets:
                 continue
             contains = [k in s for s in sepsets]
