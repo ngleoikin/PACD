@@ -273,6 +273,24 @@ def main() -> None:
         help="Fallback max-k for sepset search",
     )
     parser.add_argument(
+        "--s3cdo-bootstrap",
+        type=int,
+        default=0,
+        help="Bootstrap runs for S3C-DO stability (0 to disable)",
+    )
+    parser.add_argument(
+        "--s3cdo-bootstrap-threshold",
+        type=float,
+        default=0.95,
+        help="Skeleton stability threshold for S3C-DO bootstrap",
+    )
+    parser.add_argument(
+        "--s3cdo-dir-threshold",
+        type=float,
+        default=0.95,
+        help="Direction stability threshold for S3C-DO bootstrap",
+    )
+    parser.add_argument(
         "--mpcd-m-grid",
         default="",
         help="MPCD scales, comma-separated (e.g. 2,3,4,5)",
@@ -374,6 +392,48 @@ def main() -> None:
             s3_result = s3_learner.learn(data.values, var_names)
             directed_edges = s3_result["directed_edges"]
             sepsets = s3_result.get("sepsets", {})
+            if args.s3cdo_bootstrap > 0:
+                rng = np.random.default_rng(0)
+                n_samples = data.shape[0]
+                skeleton_counts: Dict[Tuple[str, str], int] = {}
+                dir_counts: Dict[Tuple[str, str], int] = {}
+                for _ in range(args.s3cdo_bootstrap):
+                    indices = rng.integers(0, n_samples, size=n_samples)
+                    boot_data = data.values[indices]
+                    boot_learner = S3CDOStructureLearner(s3_cfg)
+                    boot_result = boot_learner.learn(boot_data, var_names)
+                    for u, v in boot_result.get("skeleton", []):
+                        key = (u, v) if u < v else (v, u)
+                        skeleton_counts[key] = skeleton_counts.get(key, 0) + 1
+                    for edge in boot_result.get("directed_edges", []):
+                        if edge.get("orientation_method") == "undirected":
+                            continue
+                        key = (edge["source"], edge["target"])
+                        dir_counts[key] = dir_counts.get(key, 0) + 1
+
+                boot_total = max(1, args.s3cdo_bootstrap)
+                filtered_edges = []
+                for edge in directed_edges:
+                    key = tuple(sorted((edge["source"], edge["target"])))
+                    sk_freq = skeleton_counts.get(key, 0) / boot_total
+                    edge["skeleton_stability"] = sk_freq
+                    dir_freq = None
+                    if edge.get("orientation_method") != "undirected":
+                        dir_freq = dir_counts.get((edge["source"], edge["target"]), 0) / boot_total
+                        edge["dir_stability"] = dir_freq
+                    else:
+                        edge["dir_stability"] = None
+
+                    if sk_freq < args.s3cdo_bootstrap_threshold:
+                        continue
+                    if (
+                        edge.get("orientation_method") != "undirected"
+                        and (dir_freq or 0.0) < args.s3cdo_dir_threshold
+                    ):
+                        edge["orientation_method"] = "undirected"
+                        edge["direction_confidence"] = "undecided"
+                    filtered_edges.append(edge)
+                directed_edges = filtered_edges
         else:
             pc_result = _run_pc(data.values, args.alpha, args.max_k)
             directed_edges = _directed_edges_from_pc(pc_result.G, var_names)

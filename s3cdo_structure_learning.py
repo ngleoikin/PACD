@@ -57,6 +57,7 @@ class S3CDOStructureLearner:
         self.sepsets_: Dict[Tuple[int, int], List[int]] = {}
         self.sepsets_all_: Dict[Tuple[int, int], List[List[int]]] = {}
         self.edge_scores_: Dict[Tuple[int, int], float] = {}
+        self.edge_pvalues_worst_: Dict[Tuple[int, int], float] = {}
         self._alpha_eff_warned = False
 
     @property
@@ -431,6 +432,7 @@ class S3CDOStructureLearner:
                 f"[S3CDO] warning: alpha={self.config.alpha} below permutation resolution {min_p:.4f}"
             )
         edges = set(candidate_edges)
+        self.edge_pvalues_worst_.clear()
 
         for k in range(self.config.max_k + 1):
             to_remove = []
@@ -442,9 +444,12 @@ class S3CDOStructureLearner:
                 found = False
                 first_sepset: Optional[List[int]] = None
                 for S in combinations(neighbors, k):
-                    is_indep, _, _ = self._partial_corr_test(X, i, j, list(S))
+                    is_indep, _, p = self._partial_corr_test(X, i, j, list(S))
+                    key = (i, j) if i < j else (j, i)
+                    current = self.edge_pvalues_worst_.get(key, 0.0)
+                    if p > current:
+                        self.edge_pvalues_worst_[key] = float(p)
                     if is_indep:
-                        key = (i, j) if i < j else (j, i)
                         self.sepsets_all_.setdefault(key, []).append(list(S))
                         if not found:
                             found = True
@@ -471,6 +476,8 @@ class S3CDOStructureLearner:
 
         directed_edges: List[Dict] = []
         for (src, dst) in sorted(directed):
+            key = (src, dst) if src < dst else (dst, src)
+            ci_p_worst = self.edge_pvalues_worst_.get(key)
             directed_edges.append(
                 {
                     "source": var_names[src],
@@ -478,10 +485,13 @@ class S3CDOStructureLearner:
                     "orientation_method": "rule",
                     "direction_confidence": "rule",
                     "evidence": {"type": "collider_or_rule"},
+                    "ci_p_worst": ci_p_worst,
                 }
             )
 
         for (u, v) in sorted(undirected):
+            key = (u, v) if u < v else (v, u)
+            ci_p_worst = self.edge_pvalues_worst_.get(key)
             directed_edges.append(
                 {
                     "source": var_names[u],
@@ -489,6 +499,7 @@ class S3CDOStructureLearner:
                     "orientation_method": "undirected",
                     "direction_confidence": "undecided",
                     "evidence": {"type": "undirected"},
+                    "ci_p_worst": ci_p_worst,
                 }
             )
 

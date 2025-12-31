@@ -259,6 +259,9 @@ S3C-DO 相关（仅在 `--direction s3cdo` 时生效）：
 - `--s3cdo-fallback-sepset-search`：对缺失 sepset 的三元组做补搜；
   - 当 `sepsets_all_` 缺失时，用邻域条件集补充独立证据。
 - `--s3cdo-fallback-max-k`：补搜使用的最大条件集大小；为空则使用全局 `--max-k`。
+- `--s3cdo-bootstrap`：S3C-DO 结构 bootstrap 次数（0 为关闭）；用于输出稳定性并做阈值筛边。
+- `--s3cdo-bootstrap-threshold`：骨架稳定性阈值（默认 0.95）；低于阈值会丢弃该边。
+- `--s3cdo-dir-threshold`：方向稳定性阈值（默认 0.95）；低于阈值的有向边会降级为无向边。
 
 PACD/MPCD 相关（仅在 `--direction pacd/mpcd` 时生效）：
 - `--mpcd-m-grid`：MPCD 的多尺度列表（如 `2,3,4,5`）。
@@ -267,6 +270,13 @@ PACD/MPCD 相关（仅在 `--direction pacd/mpcd` 时生效）：
 多环境/干预相关（当数据含 `COND` 列，或显式启用多环境逻辑时生效）：
 - `--baseline-conds`：多环境基线条件（逗号分隔）；用于区分干预环境。
 - `--intervention`：干预映射 JSON 文件（可选）；若不提供，会把非基线环境视为干预。
+
+输出说明（重要）：
+- `edge_effects.json` 里的 `p_value` 是 **效应显著性检验（ATE=0）** 的 p 值，不是 CI 条件独立检验的 p 值。
+- S3C-DO 的条件独立证据会以 `ci_p_worst` 输出在每条边上（越小越稳健）。
+- 若启用 `--s3cdo-bootstrap`，输出还会包含：
+  - `skeleton_stability`：骨架出现频率（0~1）
+  - `dir_stability`：方向一致频率（0~1，仅有向边）
 
 使用建议：
 - 小样本或噪声大：`--direction pacd`，适当减小 `--max-k`；
