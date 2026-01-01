@@ -261,6 +261,7 @@ S3C-DO 相关（仅在 `--direction s3cdo` 时生效）：
 - `--s3cdo-fallback-max-k`：补搜使用的最大条件集大小；为空则使用全局 `--max-k`。
 - `--s3cdo-bootstrap`：S3C-DO 结构 bootstrap 次数（0 为关闭）；用于输出稳定性并做阈值筛边。
 - `--s3cdo-bootstrap-jobs`：S3C-DO bootstrap 并行进程数（默认 0 自动；设置为 1 可关闭并行）。
+  - 自动模式会按 CPU 核心数取上限；若 `--device cuda` 且设置了 `CUDA_VISIBLE_DEVICES`，也会按可见 GPU 数量做上限。
 - `--s3cdo-bootstrap-threshold`：骨架稳定性阈值（默认 0.95）；低于阈值会丢弃该边（可省略参数直接启用默认值）。
 - `--s3cdo-dir-threshold`：方向稳定性阈值（默认 0.95）；低于阈值的有向边会降级为无向边（可省略参数直接启用默认值）。
 

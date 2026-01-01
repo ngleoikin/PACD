@@ -32,6 +32,14 @@ from s3cdo_structure_learning import S3CDOConfig, S3CDOStructureLearner
 from run_pacd_ivapci_pipeline import InterventionDirector, PipelineConfig
 
 
+def _visible_gpu_count() -> int:
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if not visible:
+        return 0
+    devices = [item.strip() for item in visible.split(",") if item.strip()]
+    return len(devices)
+
+
 def _s3cdo_bootstrap_worker(
     data_values: np.ndarray,
     var_names: List[str],
@@ -437,6 +445,9 @@ def main() -> None:
                 if args.s3cdo_bootstrap_jobs == 0:
                     cpu_total = os.cpu_count() or 1
                     max_jobs = min(cpu_total, len(seeds))
+                    gpu_total = _visible_gpu_count()
+                    if args.device.startswith("cuda") and gpu_total > 0:
+                        max_jobs = min(max_jobs, gpu_total)
                 else:
                     max_jobs = min(max(1, args.s3cdo_bootstrap_jobs), len(seeds))
 
