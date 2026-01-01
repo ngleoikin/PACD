@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
 import importlib.util
@@ -29,6 +30,32 @@ from pacd_structure_learning import (
 )
 from s3cdo_structure_learning import S3CDOConfig, S3CDOStructureLearner
 from run_pacd_ivapci_pipeline import InterventionDirector, PipelineConfig
+
+
+def _s3cdo_bootstrap_worker(
+    data_values: np.ndarray,
+    var_names: List[str],
+    s3_cfg: S3CDOConfig,
+    seed: int,
+) -> Tuple[Dict[Tuple[str, str], int], Dict[Tuple[str, str], int]]:
+    rng = np.random.default_rng(seed)
+    n_samples = data_values.shape[0]
+    indices = rng.integers(0, n_samples, size=n_samples)
+    boot_data = data_values[indices]
+    boot_learner = S3CDOStructureLearner(s3_cfg)
+    boot_result = boot_learner.learn(boot_data, var_names)
+
+    skeleton_counts: Dict[Tuple[str, str], int] = {}
+    dir_counts: Dict[Tuple[str, str], int] = {}
+    for u, v in boot_result.get("skeleton", []):
+        key = (u, v) if u < v else (v, u)
+        skeleton_counts[key] = skeleton_counts.get(key, 0) + 1
+    for edge in boot_result.get("directed_edges", []):
+        if edge.get("orientation_method") == "undirected":
+            continue
+        key = (edge["source"], edge["target"])
+        dir_counts[key] = dir_counts.get(key, 0) + 1
+    return skeleton_counts, dir_counts
 
 
 def _run_pc(data: np.ndarray, alpha: float, max_k: int):
@@ -279,6 +306,12 @@ def main() -> None:
         help="Bootstrap runs for S3C-DO stability (0 to disable)",
     )
     parser.add_argument(
+        "--s3cdo-bootstrap-jobs",
+        type=int,
+        default=1,
+        help="Parallel jobs for S3C-DO bootstrap (1 to disable parallelism)",
+    )
+    parser.add_argument(
         "--s3cdo-bootstrap-threshold",
         type=float,
         nargs="?",
@@ -397,23 +430,37 @@ def main() -> None:
             directed_edges = s3_result["directed_edges"]
             sepsets = s3_result.get("sepsets", {})
             if args.s3cdo_bootstrap > 0:
-                rng = np.random.default_rng(0)
-                n_samples = data.shape[0]
                 skeleton_counts: Dict[Tuple[str, str], int] = {}
                 dir_counts: Dict[Tuple[str, str], int] = {}
-                for _ in range(args.s3cdo_bootstrap):
-                    indices = rng.integers(0, n_samples, size=n_samples)
-                    boot_data = data.values[indices]
-                    boot_learner = S3CDOStructureLearner(s3_cfg)
-                    boot_result = boot_learner.learn(boot_data, var_names)
-                    for u, v in boot_result.get("skeleton", []):
-                        key = (u, v) if u < v else (v, u)
-                        skeleton_counts[key] = skeleton_counts.get(key, 0) + 1
-                    for edge in boot_result.get("directed_edges", []):
-                        if edge.get("orientation_method") == "undirected":
-                            continue
-                        key = (edge["source"], edge["target"])
-                        dir_counts[key] = dir_counts.get(key, 0) + 1
+                data_values = data.values
+                seeds = list(range(args.s3cdo_bootstrap))
+                if args.s3cdo_bootstrap_jobs > 1:
+                    with ProcessPoolExecutor(
+                        max_workers=args.s3cdo_bootstrap_jobs
+                    ) as executor:
+                        for sk_counts, dr_counts in executor.map(
+                            _s3cdo_bootstrap_worker,
+                            [data_values] * len(seeds),
+                            [var_names] * len(seeds),
+                            [s3_cfg] * len(seeds),
+                            seeds,
+                        ):
+                            for key, value in sk_counts.items():
+                                skeleton_counts[key] = skeleton_counts.get(key, 0) + value
+                            for key, value in dr_counts.items():
+                                dir_counts[key] = dir_counts.get(key, 0) + value
+                else:
+                    for seed in seeds:
+                        sk_counts, dr_counts = _s3cdo_bootstrap_worker(
+                            data_values,
+                            var_names,
+                            s3_cfg,
+                            seed,
+                        )
+                        for key, value in sk_counts.items():
+                            skeleton_counts[key] = skeleton_counts.get(key, 0) + value
+                        for key, value in dr_counts.items():
+                            dir_counts[key] = dir_counts.get(key, 0) + value
 
                 boot_total = max(1, args.s3cdo_bootstrap)
                 filtered_edges = []
