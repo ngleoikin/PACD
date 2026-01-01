@@ -308,8 +308,8 @@ def main() -> None:
     parser.add_argument(
         "--s3cdo-bootstrap-jobs",
         type=int,
-        default=1,
-        help="Parallel jobs for S3C-DO bootstrap (1 to disable parallelism)",
+        default=0,
+        help="Parallel jobs for S3C-DO bootstrap (0 = auto, 1 = disable parallelism)",
     )
     parser.add_argument(
         "--s3cdo-bootstrap-threshold",
@@ -434,9 +434,15 @@ def main() -> None:
                 dir_counts: Dict[Tuple[str, str], int] = {}
                 data_values = data.values
                 seeds = list(range(args.s3cdo_bootstrap))
-                if args.s3cdo_bootstrap_jobs > 1:
+                if args.s3cdo_bootstrap_jobs == 0:
+                    cpu_total = os.cpu_count() or 1
+                    max_jobs = min(cpu_total, len(seeds))
+                else:
+                    max_jobs = min(max(1, args.s3cdo_bootstrap_jobs), len(seeds))
+
+                if max_jobs > 1:
                     with ProcessPoolExecutor(
-                        max_workers=args.s3cdo_bootstrap_jobs
+                        max_workers=max_jobs
                     ) as executor:
                         for sk_counts, dr_counts in executor.map(
                             _s3cdo_bootstrap_worker,
